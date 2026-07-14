@@ -1,0 +1,27 @@
+# local env / derived files
+.venv/
+.claude/settings.local.json
+.claude/settings.local.json.tmp.*
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+.pytest_cache/
+*.egg-info/
+.DS_Store
+
+# repo policy (see CLAUDE.md): only the initial example nodes are public.
+# blocks/: keep b00 only; run bookkeeping stays local
+blocks/b*/
+!blocks/b00/
+blocks/run_usage.jsonl
+blocks/run_summary.md
+# kb2/: keep the b00 summary only
+kb/kb2/*
+!kb/kb2/b00.md
+# kb1/: keep the index + a few sample notes only
+kb/kb1/*
+!kb/kb1/INDEX.md
+!kb/kb1/008_2019_Physics-informed_neural_networks_A_deep_learning_framework_f.md
+!kb/kb1/026_2020_When_and_why_PINNs_fail_to_train_A_neural_tangent_kernel_per.md
+!kb/kb1/082_2024_PirateNets_Physics-informed_Deep_Learning_with_Residual_Adap.md

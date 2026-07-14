@@ -1,0 +1,23 @@
+[project]
+name = "pinnforge"
+version = "0.2.0"
+description = "PINNForge — block-serial autonomous PINN design. Current task: see task/problem.md."
+requires-python = ">=3.11"
+dependencies = [
+    # ── Core PINN stack (frozen; problem.md documents these exact pins) ──
+    "jax[cuda12]==0.4.33",
+    "flax==0.9.0",
+    "optax==0.2.3",
+    "numpy==2.1.1",
+    "scipy==1.17.1",
+    # ── JAX-ecosystem extras (blocks may `uv add` more; core pins above stay frozen) ──
+    "jaxopt==0.8.5",
+    "evosax==0.1.6",
+    "ml_collections==1.1.0",
+    "jaxtyping==0.3.11",
+    "chex>=0.1.86",
+    "soap-jax @ git+https://github.com/haydn-jones/SOAP_JAX@ddddc25724dfd629b0cd01584eca1e32ea8ac4de",
+]
+
+[tool.uv]
+package = false
