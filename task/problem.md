@@ -1,8 +1,10 @@
 # KS — Kuramoto–Sivashinsky
 
 **Solve the PDE with a genuine physics-informed neural network (PINN).
-Classical methods may solve it efficiently, but the value of this task is
-probing the limits of PINN itself.**
+The space/time derivatives entering the PDE residual come from automatic
+differentiation of the neural network(s). Classical methods may solve it
+efficiently, but the value of this task is probing the limits of PINN
+itself.**
 
 ## Equation
 
