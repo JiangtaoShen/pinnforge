@@ -58,16 +58,16 @@ genuinely requires. Everything that can stay identical stays identical.
    Set the per-run wall (`TRAIN_TIME` + `TRAIN_WALL_S`) and per-block
    budget (`FORGE_WALL_BUDGET`) to the user's requested values.
 4. Reset knowledge and blocks for the new problem: delete every
-   `blocks/bNN/` (b00 included — it belongs to the old task),
-   `blocks/run_usage.jsonl`, `blocks/run_summary.md`, and every
-   `kb/kb2/*.md`. `kb/kb1/` stays.
+   `blocks/bNN/` directory (b00 included — it belongs to the old task;
+   this does not touch `blocks/kb2/`), `blocks/run_usage.jsonl`,
+   `blocks/run_summary.md`, and every `blocks/kb2/*.md`. `kb1/` stays.
 5. Build the new b00 (control node, same paradigm as before):
    - `mkdir blocks/b00`; copy `task/baseline.py` →
      `blocks/b00/b00_v01.py`.
    - Smoke first, then ONE full eval:
      `.venv/bin/python task/eval.py blocks/b00/b00_v01.py --smoke`,
      then the same without `--smoke` (`--gpu 0`).
-   - Write `kb/kb2/b00.md` following block.md §5's template (thrust:
+   - Write `blocks/kb2/b00.md` following block.md §5's template (thrust:
      "control: baseline measured as-is").
 6. Report the baseline rRMSE — the number every later block must
    beat. The project is now ready for `/pinnforge`.

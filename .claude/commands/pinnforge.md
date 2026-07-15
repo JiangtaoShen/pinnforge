@@ -11,14 +11,15 @@ containing `CLAUDE.md`); `<ROOT>` below means its absolute path.
 ## Per block
 
 1. Next id: `ls blocks/` → `bNN` = highest existing + 1 (zero-padded,
-   e.g. `b03`; consider only `bNN/` directories — ignore the
-   `run_usage.jsonl` / `run_summary.md` bookkeeping files). Exception — if
+   e.g. `b03`; consider only `bNN/` directories — ignore the `kb2/`
+   summaries dir and the `run_usage.jsonl` / `run_summary.md`
+   bookkeeping files). Exception — if
    the highest existing `blocks/bMM/` fails the step-3 done check —
-   no `kb/kb2/bMM.md`, or wall-time budget unspent (b00 is exempt) —
+   no `blocks/kb2/bMM.md`, or wall-time budget unspent (b00 is exempt) —
    that block died mid-run: re-dispatch `bMM` instead of a new id,
    appending to the prompt: "Workspace blocks/bMM/ already exists from
    a crashed run. Inspect its evals.jsonl, keep what is useful, spend
-   only the remaining budget, then write (or update) kb/kb2/bMM.md."
+   only the remaining budget, then write (or update) blocks/kb2/bMM.md."
 2. Dispatch ONE subagent and wait for it:
 
    ```
@@ -41,8 +42,8 @@ containing `CLAUDE.md`); `<ROOT>` below means its absolute path.
    ```bash
    B=bNN; mkdir -p blocks/$B
    while true; do sleep 1200
-     [ -f kb/kb2/$B.md ] && exit 0   # block wrote its summary
-     age=$(python3 -c "import os,glob,time; fs=[f for f in glob.glob('blocks/$B/*')+['blocks/$B','kb/kb2/$B.md'] if os.path.exists(f)]; print(int((time.time()-max(map(os.path.getmtime,fs)))/60))")
+     [ -f blocks/kb2/$B.md ] && exit 0   # block wrote its summary
+     age=$(python3 -c "import os,glob,time; fs=[f for f in glob.glob('blocks/$B/*')+['blocks/$B','blocks/kb2/$B.md'] if os.path.exists(f)]; print(int((time.time()-max(map(os.path.getmtime,fs)))/60))")
      [ "$age" -lt 30 ] || { echo "STALL: blocks/$B quiet for ${age} min"; exit 1; }
    done
    ```
@@ -51,21 +52,21 @@ containing `CLAUDE.md`); `<ROOT>` below means its absolute path.
    3); if it is still working, restart the watchdog. TaskStop the
    watchdog once the block is verified done.
 
-3. Verify — the block is done only when ALL hold: `kb/kb2/bNN.md`
+3. Verify — the block is done only when ALL hold: `blocks/kb2/bNN.md`
    exists AND the wall-time budget is spent — `blocks/bNN/.budget` ≥
    `FORGE_WALL_BUDGET` minus the task's per-run wall (task/problem.md;
    failed runs' time counts) AND `evals.jsonl` has ≥1 non-smoke,
    non-diag line. Otherwise the block paused mid-run:
    - Resume the SAME agent (SendMessage to its agentId): "Resume block
-     bNN: <X>/3000 wall-seconds spent, summary <missing|present>. Run
+     bNN: <X>/7200 wall-seconds spent, summary <missing|present>. Run
      evals in the foreground only (block.md §4), spend the remaining
-     budget, then write kb/kb2/bNN.md." Resume again if it pauses
+     budget, then write blocks/kb2/bNN.md." Resume again if it pauses
      again.
    - If the agent is gone (cannot be resumed), dispatch ONE fresh
      continuation subagent (same model pin) with the step-1 crashed-run
      prompt — or, when only the summary is missing after a spent
      budget, the no-eval repair prompt: "Block bNN finished without
-     writing kb/kb2/bNN.md. Read block.md §5, read blocks/bNN/ (code +
+     writing blocks/kb2/bNN.md. Read block.md §5, read blocks/bNN/ (code +
      evals.jsonl), and write the summary faithfully. Do not run any
      evaluations." Never write it yourself.
    - A hard environment failure (GPU/driver down) is the one excuse:
@@ -82,7 +83,7 @@ containing `CLAUDE.md`); `<ROOT>` below means its absolute path.
    ```
 
    Then relay one line to the user: `bNN done — best <rRMSE> (<file>),
-   wall <spent>/3000 s`, and continue with the next block.
+   wall <spent>/7200 s`, and continue with the next block.
 
 ## After the last block
 
@@ -154,10 +155,10 @@ print('OVERALL BEST', best[0], 'in', best[1])"
   not be reproducible. The `opus` alias currently resolves to Opus 4.8.
 - Strictly serial: never two subagents alive at once; block N is
   verified done before block N+1 is dispatched.
-- Never do block work yourself: no reading `kb/kb1/`, no writing
+- Never do block work yourself: no reading `kb1/`, no writing
   candidates or summaries, no running `task/eval.py` — step-3 repairs
   run in subagents too.
 - A block whose evals all failed is still done once its budget is
   spent and its summary exists — do not re-run it.
-- Never touch anything in `task/`, `kb/kb1/`, existing `kb/kb2/*.md`,
+- Never touch anything in `task/`, `kb1/`, existing `blocks/kb2/*.md`,
   or other blocks' directories.

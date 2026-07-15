@@ -16,12 +16,12 @@ blocks/b*/
 !blocks/b00/
 blocks/run_usage.jsonl
 blocks/run_summary.md
-# kb2/: keep the b00 summary only
-kb/kb2/*
-!kb/kb2/b00.md
-# kb1/: keep the index + a few sample notes only
-kb/kb1/*
-!kb/kb1/INDEX.md
-!kb/kb1/008_2019_Physics-informed_neural_networks_A_deep_learning_framework_f.md
-!kb/kb1/026_2020_When_and_why_PINNs_fail_to_train_A_neural_tangent_kernel_per.md
-!kb/kb1/082_2024_PirateNets_Physics-informed_Deep_Learning_with_Residual_Adap.md
+# blocks/kb2/: keep the b00 summary only
+blocks/kb2/*
+!blocks/kb2/b00.md
+# kb1/ (at repo root): keep the index + a few sample notes only
+kb1/*
+!kb1/INDEX.md
+!kb1/008_2019_Physics-informed_neural_networks_A_deep_learning_framework_f.md
+!kb1/026_2020_When_and_why_PINNs_fail_to_train_A_neural_tangent_kernel_per.md
+!kb1/082_2024_PirateNets_Physics-informed_Deep_Learning_with_Residual_Adap.md

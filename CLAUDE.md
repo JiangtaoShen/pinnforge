@@ -2,11 +2,11 @@
 
 Goal: drive rRMSE down on the current task in `task/problem.md` by
 running **blocks** in series. A block = one autonomous subagent
-(**Opus 4.8**) + 3000 s of GPU-run wall time + one written summary.
+(**Opus 4.8**) + 7200 s of GPU-run wall time + one written summary.
 Knowledge compounds through the summaries, not through orchestrator
 state.
 
-The framework (workflow, `block.md`, `kb/kb1/`) is task-agnostic; it
+The framework (workflow, `block.md`, `kb1/`) is task-agnostic; it
 touches the task only through the **task contract** below. Swapping
 `task/` swaps the problem.
 
@@ -22,10 +22,11 @@ charter: resources, direction, rules, budget, required output).
 
 Project skills in `.claude/skills/` (say the phrase):
 
-- **"archive the run data"** (`archive-data`) — pack `blocks/` + `kb/` +
-  `task/` + `run_summary.md` into `/home/jiangtao/pinnforge_data/`.
+- **"archive the run data"** (`archive-data`) — pack `blocks/` (incl.
+  `kb2/`) + `kb1/` + `task/` + `run_summary.md` into
+  `/home/jiangtao/pinnforge_data/`.
 - **"reset the framework"** (`reset-framework`) — archive if unbacked,
-  then reset `blocks/` and `kb/kb2/` to the b00 state.
+  then reset `blocks/` (incl. `blocks/kb2/`) to the b00 state.
 - **"swap the task to `<pkg>`"** (`swap-task`) — install a new `task/`
   package (per the Task contract) and rebuild the b00 baseline node.
 
@@ -34,8 +35,8 @@ Project skills in `.claude/skills/` (say the phrase):
 | Path | Role | Mutability |
 |---|---|---|
 | `task/` | **what to solve**: `problem.md` + `baseline.py` + `eval.py` + reference data (see Task contract) | frozen |
-| `kb/kb1/` | **what is known**: fixed corpus of paper notes + `INDEX.md` | fixed |
-| `kb/kb2/` | accumulated block summaries: `b00.md, b01.md, …` | append-only |
+| `kb1/` | **what is known**: fixed corpus of paper notes + `INDEX.md` | fixed |
+| `blocks/kb2/` | accumulated block summaries: `b00.md, b01.md, …` | append-only |
 | `blocks/bNN/` | **the work**: per-block workspace (`bNN_*.py`, `bNN_*.pkl`, `evals.jsonl`) | owned by block NN |
 | `blocks/run_usage.jsonl` | append-only per-block usage ledger (model, duration, tokens, tool-uses) | appended by `/pinnforge` |
 | `blocks/run_summary.md` | regenerated each run: per-block model + time + tokens + best rRMSE, with totals | written by `/pinnforge` |
@@ -69,7 +70,7 @@ Project skills in `.claude/skills/` (say the phrase):
   Candidates keep `task/baseline.py`'s frozen header and
   `train`/`predict_fn` contract. The JAX core stack stays frozen (pins
   in `pyproject.toml`); extensions may be added via `uv add`.
-- `kb/kb2/bNN.md` is written by block NN alone, at block end (a
+- `blocks/kb2/bNN.md` is written by block NN alone, at block end (a
   resumed block may revise its own summary); nothing else edits it.
 - `evals.jsonl` is written by `task/eval.py` alone; each block's
   non-smoke records stay untouched once written.
@@ -94,7 +95,7 @@ package that honors it plugs in without framework changes:
 - `task/eval.py` — the single evaluation tool, CLI:
   `eval.py blocks/bNN/<file>.py [--gpu G] [--seed S] [--smoke | --diag]`.
   It must: enforce the per-block budget (`FORGE_WALL_BUDGET`, default
-  3000 wall-seconds across all GPU runs, concurrency-safe; CPU
+  7200 wall-seconds across all GPU runs, concurrency-safe; CPU
   `--smoke` free; `--diag` runs an arbitrary block-owned script on
   GPU, metered the same way); append one JSON record per run to
   `blocks/bNN/evals.jsonl` with at least `smoke: bool`, `diag: bool`
@@ -106,13 +107,13 @@ package that honors it plugs in without framework changes:
 - Any reference data eval.py needs lives inside `task/`.
 
 For a new problem: swap the contents of `task/` (honoring the
-contract), reset `blocks/` and `kb/kb2/` to their b00 state; `kb/kb1/`
-and the workflow stay.
+contract), reset `blocks/` (incl. `blocks/kb2/`) to its b00 state;
+`kb1/` and the workflow stay.
 
 ## Repo policy
 
 The public repo carries the framework plus minimal examples: the
-current `task/` package, `blocks/b00/` and `kb/kb2/b00.md` (the
-initial nodes), and `kb/kb1/INDEX.md` + a few sample notes.
-Everything else under `blocks/`, `kb/kb2/`, `kb/kb1/` is local-only
-(gitignored) — as is any future task's data.
+current `task/` package, `blocks/b00/` and `blocks/kb2/b00.md` (the
+initial nodes), and `kb1/INDEX.md` + a few sample notes.
+Everything else under `blocks/` (incl. `blocks/kb2/`) and `kb1/` is
+local-only (gitignored) — as is any future task's data.

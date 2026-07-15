@@ -1,6 +1,6 @@
 ---
 name: archive-data
-description: Archive a finished /pinnforge run — pack blocks/ + kb/ + task/ + run_summary.md into /home/jiangtao/pinnforge_data. Trigger phrase: "archive the run data".
+description: Archive a finished /pinnforge run — pack blocks/ (incl. kb2/) + kb1/ + task/ + run_summary.md into /home/jiangtao/pinnforge_data. Trigger phrase: "archive the run data".
 ---
 
 Archive the current PINNForge run. Work from the project root.
@@ -15,7 +15,7 @@ Archive the current PINNForge run. Work from the project root.
    ```bash
    cp blocks/run_summary.md run_summary.md
    tar czf /home/jiangtao/pinnforge_data/<name> \
-       --exclude='__pycache__' blocks kb task run_summary.md
+       --exclude='__pycache__' blocks kb1 task run_summary.md
    rm run_summary.md
    ```
 

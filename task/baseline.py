@@ -12,9 +12,9 @@ the process at this wall. ``train()`` must return params with margin
 to spare (this baseline stops ``SAVE_MARGIN_S = 5`` s early).
 
 Data discipline: the ONLY field data this baseline (and any descendant)
-may read is the initial condition ``task/ks_ic.csv`` (u at t=0). The
-interior/future truth lives solely inside ``eval.py``; a candidate that
-reads it is cheating.
+may read is the initial condition ``task/ks_ic.csv`` (u at t=0). Never
+read ``task/ref_data.csv`` — it is the scoring truth, used by
+``task/eval.py`` for scoring alone.
 """
 from __future__ import annotations
 
