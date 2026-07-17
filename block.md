@@ -29,7 +29,9 @@ current best:
 - **Reflect as you go.** After each eval, ask what the result actually
   says about the direction, and think it through against kb1 and kb2
   before deciding the next move.
-- **Read kb1 carefully.** Thoroughly read the relevant paper notes.
+- **Read kb1 carefully.** Techniques that crack this problem are
+  hidden there; a stall usually means you haven't found the right
+  techniques yet.
 - **Take diagnostics seriously.** Understanding why a field fails is
   worth its GPU cost.
 
