@@ -58,7 +58,7 @@ containing `CLAUDE.md`); `<ROOT>` below means its absolute path.
    failed runs' time counts) AND `evals.jsonl` has ≥1 non-smoke,
    non-diag line. Otherwise the block paused mid-run:
    - Resume the SAME agent (SendMessage to its agentId): "Resume block
-     bNN: <X>/7200 wall-seconds spent, summary <missing|present>. Run
+     bNN: <X>/3600 wall-seconds spent, summary <missing|present>. Run
      evals in the foreground only (block.md §4), spend the remaining
      budget, then write blocks/kb2/bNN.md." Resume again if it pauses
      again.
@@ -83,7 +83,7 @@ containing `CLAUDE.md`); `<ROOT>` below means its absolute path.
    ```
 
    Then relay one line to the user: `bNN done — best <rRMSE> (<file>),
-   wall <spent>/7200 s`, and continue with the next block.
+   wall <spent>/3600 s`, and continue with the next block.
 
 ## After the last block
 

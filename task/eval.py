@@ -11,7 +11,7 @@ Usage (always via the project venv, from the project root):
     .venv/bin/python task/eval.py blocks/bXX/<script>.py --diag [--gpu 0]
 
 * The candidate must live under ``blocks/bNN/``. Its block is inferred
-  from the path; the budget (``FORGE_WALL_BUDGET``, default 7200
+  from the path; the budget (``FORGE_WALL_BUDGET``, default 3600
   wall-seconds of GPU runs per block) is enforced via a file-locked
   seconds counter (``blocks/bNN/.budget``, seeded from the non-smoke
   records in ``evals.jsonl``), so concurrent runs cannot overrun it.
@@ -19,18 +19,18 @@ Usage (always via the project venv, from the project root):
 * Every non-smoke invocation is charged its actual wall time,
   **crash or not** — smoke-test first.
 * ``--smoke``: CPU-only dress rehearsal. The frozen-header literal
-  ``TRAIN_TIME = 300.0`` is patched to 10 s in a temp copy, training and
+  ``TRAIN_TIME = 150.0`` is patched to 10 s in a temp copy, training and
   scoring run end-to-end, the record is written with ``"smoke": true``,
   no budget charged, no params saved. Catches contract/shape/NaN bugs
   for free.
 * ``--diag``: run an arbitrary block-owned diagnostic script at full
   fidelity (the eval-gate token is set, one GPU visible, GPU lock held),
-  charged by the second, wall-capped at 300 s like a training run. No
+  charged by the second, wall-capped at 150 s like a training run. No
   frozen-header check, no scoring, no params; the record carries
   ``"diag": true`` and ``rRMSE: null``.
 * Candidate contract (see task/baseline.py): module-level
   ``train(rng, eval_callback=None) -> (params, step_count)`` and
-  ``predict_fn(params, X) -> {"u"}``; the frozen PDE-CONSTANTS
+  ``predict_fn(params, X) -> {"u","v","p"}``; the frozen PDE-CONSTANTS
   header byte-identical to baseline.py, warmup step before the clock.
 * GPU discipline: a per-GPU file lock serializes training runs on the
   same GPU id (a second invocation blocks until the first finishes).
@@ -63,10 +63,10 @@ HERE = Path(__file__).resolve().parent      # task/
 ROOT = HERE.parent                          # project root
 REF_CSV = HERE / "ref_data.csv"
 
-BUDGET = float(os.environ.get("FORGE_WALL_BUDGET", "7200"))  # wall-seconds of GPU runs per block
-TRAIN_TIME_LITERAL = "TRAIN_TIME = 300.0"
+BUDGET = float(os.environ.get("FORGE_WALL_BUDGET", "3600"))  # wall-seconds of GPU runs per block
+TRAIN_TIME_LITERAL = "TRAIN_TIME = 150.0"
 SMOKE_TRAIN_TIME = "TRAIN_TIME = 10.0 "  # same length keeps line layout sane
-TRAIN_WALL_S = 300.0    # hard wall on any GPU run (train or --diag) —
+TRAIN_WALL_S = 150.0    # hard wall on any GPU run (train or --diag) —
                         # the task's whole-process budget (= TRAIN_TIME):
                         # imports, JIT compile, training and param save;
                         # the FORGE_T0 env var gives candidates the anchor
@@ -127,10 +127,10 @@ class _RestrictedUnpickler(pickle.Unpickler):
 
 
 def worker_eval(code_path: str, params_path: str) -> int:
-    """Child process: restricted-unpickle params, exec candidate, predict
-    on the reference grid, print rRMSE/MSE. KS-chaotic protocol (matching
-    Scale-PINN / jaxpi): plain relative L2 of u over the full t<=0.4 grid —
-    every point counts, no boundary override."""
+    """Child process: restricted-unpickle params, exec candidate,
+    predict on the reference grid, print rRMSE/MSE (paper protocol:
+    relative L2 on concatenated [u; v], boundary predictions overridden
+    by ground truth first)."""
     try:
         import numpy as np
         import jax.numpy as jnp
@@ -146,21 +146,31 @@ def worker_eval(code_path: str, params_path: str) -> int:
         predict_fn = mod.__dict__["predict_fn"]
 
         csv = np.loadtxt(REF_CSV, delimiter=",", skiprows=1, dtype=np.float64)
-        data_X, gt_u = csv[:, 0:2], csv[:, 2:3]   # columns: t, x, u
+        data_X, data_Y = csv[:, 0:2], csv[:, 2:5]
+        bc_mask = (
+            np.isclose(data_X[:, 0], data_X[:, 0].min())
+            | np.isclose(data_X[:, 0], data_X[:, 0].max())
+            | np.isclose(data_X[:, 1], data_X[:, 1].min())
+            | np.isclose(data_X[:, 1], data_X[:, 1].max())
+        )
 
         preds = predict_fn(params, jnp.asarray(data_X.astype(np.float32)))
         u_pred = np.asarray(preds["u"], dtype=np.float64).reshape(-1, 1)
+        v_pred = np.asarray(preds["v"], dtype=np.float64).reshape(-1, 1)
 
         N = data_X.shape[0]
-        if u_pred.shape != (N, 1):
-            print(json.dumps({"error": f"predict_fn returned bad shape {u_pred.shape}"}))
+        if u_pred.shape != (N, 1) or v_pred.shape != (N, 1):
+            print(json.dumps({"error": f"predict_fn returned bad shapes {u_pred.shape}/{v_pred.shape}"}))
             return 1
-        if not np.all(np.isfinite(u_pred)):
+        if not (np.all(np.isfinite(u_pred)) and np.all(np.isfinite(v_pred))):
             print(json.dumps({"rRMSE": None, "MSE": None, "error": "non-finite predictions"}))
             return 0
 
-        diff = u_pred - gt_u
-        rRMSE = float(np.linalg.norm(diff) / np.linalg.norm(gt_u))
+        gt_u, gt_v = data_Y[:, 0:1], data_Y[:, 1:2]
+        u_pred[bc_mask] = gt_u[bc_mask]
+        v_pred[bc_mask] = gt_v[bc_mask]
+        diff = np.hstack([u_pred, v_pred]) - np.hstack([gt_u, gt_v])
+        rRMSE = float(np.linalg.norm(diff) / np.linalg.norm(np.hstack([gt_u, gt_v])))
         MSE = float(np.mean(diff ** 2))
         print(json.dumps({"rRMSE": rRMSE, "MSE": MSE}))
         return 0
@@ -286,7 +296,7 @@ def main() -> int:
         _budget_mutate(block_dir, _claim)
         if refused:
             print(f"error: block {block} has spent {refused[0]:.0f}/{BUDGET:.0f} wall-seconds — "
-                  f"budget exhausted. Write your summary (blocks/kb2/{block}.md) and finish.",
+                  f"budget exhausted. Write your summary (kb/kb2/{block}.md) and finish.",
                   file=sys.stderr)
             return 2
 

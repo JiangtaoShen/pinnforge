@@ -1,20 +1,15 @@
-"""Vanilla PINN baseline for the KS-chaotic benchmark (tree root).
+"""Vanilla PINN baseline for NS-LDC Re=3200 (tree root).
 
 Contract (do not change):
-  - ``predict_fn(params, X) -> {"u"}``
+  - ``predict_fn(params, X) -> {"u","v","p"}``
   - ``train(rng, eval_callback=None) -> (params, step_count)``
   - Frozen PDE-CONSTANTS header is byte-identical across all descendants.
 
-Time budget (frozen): ``TRAIN_TIME = 300`` s of wall-clock for the
+Time budget (frozen): ``TRAIN_TIME = 150`` s of wall-clock for the
 WHOLE process, anchored at ``_T0`` (process start) — imports, JIT
 compilation, training and param save all included; ``eval.py`` kills
 the process at this wall. ``train()`` must return params with margin
 to spare (this baseline stops ``SAVE_MARGIN_S = 5`` s early).
-
-Data discipline: the ONLY field data this baseline (and any descendant)
-may read is the initial condition ``task/ks_ic.csv`` (u at t=0). Never
-read ``task/ref_data.csv`` — it is the scoring truth, used by
-``task/eval.py`` for scoring alone.
 """
 from __future__ import annotations
 
@@ -24,35 +19,35 @@ from __future__ import annotations
 
 # --- I/O shape ---
 INPUT_DIM    = 2
-OUTPUT_DIM   = 1
-INPUT_NAMES  = ("t", "x")
-FIELD_NAMES  = ("u",)
+OUTPUT_DIM   = 3
+INPUT_NAMES  = ("x", "y")
+FIELD_NAMES  = ("u", "v", "p")
 
 # --- Domain ---
-T_MIN, T_MAX = 0.0, 0.4
-X_MIN, X_MAX = 0.0, 6.283185307179586   # 2*pi
-HAS_TIME = True
+X_MIN, X_MAX = 0.0, 1.0
+Y_MIN, Y_MAX = 0.0, 1.0
+HAS_TIME = False
 
 # --- Equation structure ---
-TIME_DERIV_ORDER        = 1
-MAX_SPATIAL_DERIV_ORDER = 4   # u_xxxx
-N_RESIDUAL_COMPONENTS   = 1
+TIME_DERIV_ORDER        = 0
+MAX_SPATIAL_DERIV_ORDER = 2
+N_RESIDUAL_COMPONENTS   = 3   # ru, rv, continuity
 HAS_SOURCE              = False
 
 # --- Boundary topology ---
-BOUNDARY_NAMES = ("x_lo", "x_hi")
-PERIODIC_AXES  = ("x",)       # u(t, X_MIN) = u(t, X_MAX)
-GEOMETRY_KIND  = "periodic_strip"
+BOUNDARY_NAMES = ("top", "bottom", "left", "right")
+PERIODIC_AXES  = ()
+GEOMETRY_KIND  = "box"
 
-# --- Physical parameters (scaled KS: u_t + V1 u u_x + V2 u_xx + V3 u_xxxx = 0) ---
-V1 = 100.0 / 16.0        # 6.25
-V2 = 100.0 / 16.0**2     # 0.390625
-V3 = 100.0 / 16.0**4     # ~1.5259e-3
+# --- Physical parameters ---
+RE     = 3200.0      # NS-LDC Re=3200; harder regime than Re=1000
+NU     = 1.0 / RE
+U_LID  = 1.0
 
 # --- Training budget ---
 import os as _os, time as _time
 _T0 = float(_os.environ.get("FORGE_T0", _time.time()))  # process-start wall anchor
-TRAIN_TIME = 300.0     # total wall-clock seconds for the WHOLE process,
+TRAIN_TIME = 150.0     # total wall-clock seconds for the WHOLE process,
                        # from _T0: imports, JIT compile, training and param
                        # save all included — eval.py kills the process at
                        # this wall; return params with margin to spare
@@ -65,103 +60,104 @@ if _os.environ.get("FORGE_EVAL_TOKEN") != "task/eval.py":
 # ═══════════════════════════════════════════════════════════════
 
 import time
-from pathlib import Path
 from typing import Any, Callable
 
 import jax
 import jax.numpy as jnp
-from jax import grad, jit, random, vmap
+from jax import jacfwd, jit, random, vmap
 import jax.flatten_util
 import numpy as np
 import optax
 from flax import linen as nn
 
 
-def _locate(name: str) -> Path:
-    """Find task/<name> by walking up from cwd (eval.py runs from root)."""
-    here = Path.cwd()
-    for base in [here, *here.parents]:
-        cand = base / "task" / name
-        if cand.is_file():
-            return cand
-    return Path("task") / name
-
-
-# ══════════ Vanilla PINN: 5 × 100 tanh, output u ══════════
+# ══════════ Vanilla PINN: 5 × 100 tanh, output (u, v, p) ══════════
 
 class PINN(nn.Module):
-    """5 hidden layers × 100 nodes, tanh everywhere, He-uniform init,
-    linear scalar output u. A single plain MLP — no feature mapping, no
-    skip connections, no special activations."""
+    """5 hidden layers × 100 nodes, tanh activation everywhere, He-uniform
+    init, linear output of 3 channels (u, v, p). No feature mapping, no
+    shared-trunk / split-head structure — a single MLP."""
     hidden_width: int = 100
     n_hidden_layers: int = 5
 
     @nn.compact
-    def __call__(self, tx):
-        # tx: [N, 2] with columns (t, x)
+    def __call__(self, xy):
+        # xy: [N, 2]
         kinit = jax.nn.initializers.he_uniform()
-        h = tx
+        h = xy
         for _ in range(self.n_hidden_layers):
             h = nn.Dense(self.hidden_width, kernel_init=kinit)(h)
             h = nn.tanh(h)
-        return nn.Dense(OUTPUT_DIM, kernel_init=kinit)(h)  # → [N, 1]: u
+        return nn.Dense(OUTPUT_DIM, kernel_init=kinit)(h)  # → [N, 3]: (u, v, p)
 
 
-# ══════════ Data: analytic collocation + periodic BC, IC from file ══════════
+# ══════════ Data: synthetic 100×100 grid + analytic BC ══════════
 
 def _build_dataset():
-    """Collocation grid + IC points (from ks_ic.csv) + periodic-BC t-samples.
+    """100×100 uniform grid over [0,1]^2.
 
-    Returns:
-      pts_col : [Nc, 2] interior collocation coordinates (PDE residual)
-      pts_ic  : [Ni, 2] (t=0, x) coordinates for the initial condition
-      u_ic    : [Ni]    IC target values u(0, x)
-      t_bc    : [Nb]    time samples for the periodic constraint
-                        u(t, X_MIN) = u(t, X_MAX)
+    Returns three disjoint point sets:
+
+    * ``pts_int``: strictly INTERIOR collocation points for the PDE
+      residual loss (corners and walls both excluded). The PDE is not
+      enforced on Dirichlet boundaries in the standard PINN formulation;
+      mixing BC points into the residual loss is statistically wasteful
+      and conceptually wrong.
+    * ``pts_bc``: boundary (wall) points, corners excluded, for the BC loss.
+    * BC values: u = U_LID on top wall, u=0 elsewhere; v=0 on all walls.
     """
-    # collocation: uniform grid, strict interior in time (t=0 IC line
-    # excluded — the PDE residual is not enforced on the supervised
-    # initial condition), x on the half-open ring [0, 2pi).
-    nt, nx = 101, 512
-    ts = np.linspace(T_MIN, T_MAX, nt)[1:]
-    xs = np.linspace(X_MIN, X_MAX, nx, endpoint=False)
-    T, X = np.meshgrid(ts, xs, indexing="ij")
-    pts_col = np.stack([T.ravel(), X.ravel()], axis=1).astype(np.float32)
+    nx, ny = 100, 100
+    xs = np.linspace(X_MIN, X_MAX, nx)
+    ys = np.linspace(Y_MIN, Y_MAX, ny)
+    X, Y = np.meshgrid(xs, ys)
+    pts = np.stack([X.flatten(), Y.flatten()], axis=1)
 
-    # initial condition (the ONLY field data we may read)
-    ic = np.loadtxt(_locate("ks_ic.csv"), delimiter=",", skiprows=1, dtype=np.float64)
-    x_ic, u_ic = ic[:, 0], ic[:, 1]
-    pts_ic = np.stack([np.zeros_like(x_ic), x_ic], axis=1).astype(np.float32)
+    on_wall = (
+        (pts[:, 0] == X_MIN) | (pts[:, 0] == X_MAX)
+        | (pts[:, 1] == Y_MIN) | (pts[:, 1] == Y_MAX)
+    )
+    on_corner = (
+        ((pts[:, 0] == X_MIN) & (pts[:, 1] == Y_MAX))
+        | ((pts[:, 0] == X_MAX) & (pts[:, 1] == Y_MAX))
+        | ((pts[:, 0] == X_MIN) & (pts[:, 1] == Y_MIN))
+        | ((pts[:, 0] == X_MAX) & (pts[:, 1] == Y_MIN))
+    )
 
-    # periodic BC: time samples at which u(t,0) and u(t,2pi) must agree
-    t_bc = np.linspace(T_MIN, T_MAX, nt).astype(np.float32)
+    # pts_int: walls (incl. corners) excluded → strict interior.
+    pts_int = pts[~on_wall]
+    # pts_bc: walls minus corners. (Corners are excluded because the LDC
+    # geometry has a discontinuous BC at the two top corners — u=U_LID on
+    # the lid but u=0 on the adjacent side walls — so the BC value there
+    # is ambiguous.)
+    pts_bc = pts[on_wall & ~on_corner]
+
+    u_bc_vals = np.where(pts_bc[:, 1] == Y_MAX, U_LID, 0.0).astype(np.float32)
+    v_bc_vals = np.zeros(len(pts_bc), dtype=np.float32)
 
     return (
-        jnp.array(pts_col),
-        jnp.array(pts_ic),
-        jnp.array(u_ic.astype(np.float32)),
-        jnp.array(t_bc),
+        jnp.array(pts_int.astype(np.float32)),
+        jnp.array(pts_bc.astype(np.float32)),
+        jnp.array(u_bc_vals),
+        jnp.array(v_bc_vals),
     )
 
 
 # ══════════ Training hyperparameters (intentionally minimal) ══════════
 
 LR        = 1e-3      # fixed, no schedule
-WEIGHT_IC = 1.0       # vanilla: no loss re-weighting
-WEIGHT_BC = 1.0
-BS_COL    = 1000      # collocation points per minibatch
-BS_IC     = 128       # IC points per minibatch
-BS_BC     = 128       # periodic-BC time samples per minibatch
+WEIGHT_BC = 1.0       # default — no PDE-vs-BC re-weighting (vanilla)
+BS_INT    = 350       # interior collocation points per minibatch
+BS_BC     = 50        # boundary points per minibatch (matches batch_size=400)
 SAVE_MARGIN_S = 5.0   # stop the loop this early so device_get + pickling
                       # finish before eval.py's TRAIN_TIME wall
 
 
-# ══════════ Loss: KS residual via autograd, IC + periodic-BC L2 ══════════
+# ══════════ Loss: PDE residual via autograd, BC L2 ══════════
 
 def _make_train(rng_init):
     """Build the JIT'd minibatch + residual + loss + update closures."""
-    pts_col, pts_ic, u_ic, t_bc = _build_dataset()
-    n_col, n_ic, n_bc = len(pts_col), len(pts_ic), len(t_bc)
+    pts_int, pts_bc, u_bc, v_bc = _build_dataset()
+    n_int, n_bc = len(pts_int), len(pts_bc)
 
     model = PINN()
     key, rng = random.split(rng_init)
@@ -169,44 +165,52 @@ def _make_train(rng_init):
     params = model.init(key, dummy)
     flat_params, unravel = jax.flatten_util.ravel_pytree(params)
 
-    # scalar u(t, x) for one point
-    def u_scalar(params_flat, t, x):
-        return model.apply(unravel(params_flat), jnp.stack([t, x])[None, :])[0, 0]
+    # Single-point forward → returns [3]: (u, v, p)
+    def predict_one(params_flat, xy):
+        return model.apply(unravel(params_flat), xy[None, :])[0]
 
-    # KS residual at one point: u_t + V1 u u_x + V2 u_xx + V3 u_xxxx
-    u_t_fn   = grad(u_scalar, argnums=1)
-    u_x_fn   = grad(u_scalar, argnums=2)
-    u_xx_fn  = grad(u_x_fn,  argnums=2)
-    u_xxx_fn = grad(u_xx_fn, argnums=2)
-    u_xxxx_fn = grad(u_xxx_fn, argnums=2)
+    # First derivatives: jacobian wrt xy → shape [3, 2]
+    # rows = (u, v, p); cols = (x, y) partials
+    d1_fn = jacfwd(predict_one, argnums=1)
 
-    def residual_per_point(params_flat, tx):
-        t, x = tx[0], tx[1]
-        u     = u_scalar(params_flat, t, x)
-        u_t   = u_t_fn(params_flat, t, x)
-        u_x   = u_x_fn(params_flat, t, x)
-        u_xx  = u_xx_fn(params_flat, t, x)
-        u_xxxx = u_xxxx_fn(params_flat, t, x)
-        r = u_t + V1 * u * u_x + V2 * u_xx + V3 * u_xxxx
-        return r ** 2
+    # Second derivatives: hessian-like, shape [3, 2, 2]
+    # [field_idx, i, j] = ∂²(u/v/p)/(∂xy[i]∂xy[j])
+    d2_fn = jacfwd(jacfwd(predict_one, argnums=1), argnums=1)
 
+    def residual_per_point(params_flat, xy):
+        uvp = predict_one(params_flat, xy)
+        u, v, p = uvp[0], uvp[1], uvp[2]
+
+        d1 = d1_fn(params_flat, xy)            # [3, 2]
+        u_x, u_y = d1[0, 0], d1[0, 1]
+        v_x, v_y = d1[1, 0], d1[1, 1]
+        p_x, p_y = d1[2, 0], d1[2, 1]
+
+        d2 = d2_fn(params_flat, xy)            # [3, 2, 2]
+        u_xx, u_yy = d2[0, 0, 0], d2[0, 1, 1]
+        v_xx, v_yy = d2[1, 0, 0], d2[1, 1, 1]
+
+        # NS residuals
+        r_c  = u_x + v_y
+        r_mx = u * u_x + v * u_y + p_x - (1.0 / RE) * (u_xx + u_yy)
+        r_my = u * v_x + v * v_y + p_y - (1.0 / RE) * (v_xx + v_yy)
+
+        return r_c ** 2 + r_mx ** 2 + r_my ** 2
+
+    # Vectorize over the interior batch
     residual_batch = vmap(residual_per_point, in_axes=(None, 0))
-    u_batch = vmap(u_scalar, in_axes=(None, 0, 0))
 
-    def loss_fn(params_flat, col, ic_xy, ic_u, bc_t):
-        # PDE residual on interior collocation
-        pde_loss = jnp.mean(residual_batch(params_flat, col))
+    def loss_fn(params_flat, xy_int, xy_bc_batch, u_bc_batch, v_bc_batch):
+        # PDE loss on interior collocation
+        pde_per_pt = residual_batch(params_flat, xy_int)
+        pde_loss   = jnp.mean(pde_per_pt)
 
-        # initial condition
-        u_pred_ic = u_batch(params_flat, ic_xy[:, 0], ic_xy[:, 1])
-        ic_loss = jnp.mean((u_pred_ic - ic_u) ** 2)
+        # BC loss on boundary (only u, v supervised — pressure is gauge-free)
+        bc_uvp = vmap(predict_one, in_axes=(None, 0))(params_flat, xy_bc_batch)
+        u_pred, v_pred = bc_uvp[:, 0], bc_uvp[:, 1]
+        bc_loss = jnp.mean((u_pred - u_bc_batch) ** 2 + (v_pred - v_bc_batch) ** 2)
 
-        # periodic BC: u(t, X_MIN) == u(t, X_MAX)
-        u_lo = u_batch(params_flat, bc_t, jnp.full_like(bc_t, X_MIN))
-        u_hi = u_batch(params_flat, bc_t, jnp.full_like(bc_t, X_MAX))
-        bc_loss = jnp.mean((u_lo - u_hi) ** 2)
-
-        return pde_loss + WEIGHT_IC * ic_loss + WEIGHT_BC * bc_loss
+        return pde_loss + WEIGHT_BC * bc_loss
 
     loss_and_grad = jit(jax.value_and_grad(loss_fn))
 
@@ -214,12 +218,15 @@ def _make_train(rng_init):
     opt_state = optimizer.init(flat_params)
 
     @jit
-    def update(params_flat, opt_state, keys):
-        k_col, k_ic, k_bc = keys
-        col = pts_col[random.choice(k_col, n_col, (BS_COL,))]
-        ic_idx = random.choice(k_ic, n_ic, (BS_IC,))
-        bc_t = t_bc[random.choice(k_bc, n_bc, (BS_BC,))]
-        loss, grads = loss_and_grad(params_flat, col, pts_ic[ic_idx], u_ic[ic_idx], bc_t)
+    def update(params_flat, opt_state, key_pair):
+        key1, key2 = key_pair
+        idx_int = random.choice(key1, n_int, (BS_INT,))
+        idx_bc  = random.choice(key2, n_bc,  (BS_BC,))
+        xy_int_batch = pts_int[idx_int]
+        xy_bc_batch  = pts_bc[idx_bc]
+        ub = u_bc[idx_bc]
+        vb = v_bc[idx_bc]
+        loss, grads = loss_and_grad(params_flat, xy_int_batch, xy_bc_batch, ub, vb)
         updates, opt_state = optimizer.update(grads, opt_state)
         new_params = optax.apply_updates(params_flat, updates)
         return new_params, opt_state, loss
@@ -233,11 +240,11 @@ _PREDICT_MODEL = PINN()
 
 
 def predict_fn(params, X):
-    """X: jnp.ndarray of shape [BS, 2] with columns (t, x).
-    Returns dict {"u": [BS]}.
+    """X: jnp.ndarray of shape [BS, 2] with columns (x, y).
+    Returns dict {"u": [BS], "v": [BS], "p": [BS]}.
     """
-    out = _PREDICT_MODEL.apply(params, X)   # [BS, 1]
-    return {"u": out[:, 0]}
+    out = _PREDICT_MODEL.apply(params, X)   # [BS, 3]
+    return {"u": out[:, 0], "v": out[:, 1], "p": out[:, 2]}
 
 
 def train(rng, eval_callback: Callable[[Any, int, float], None] | None = None):
@@ -258,9 +265,8 @@ def train(rng, eval_callback: Callable[[Any, int, float], None] | None = None):
 
     # Warmup step: the first update() call JIT-compiles the whole training
     # step; float(loss) blocks until it finishes. It is a real step (counted).
-    keys = random.split(rng_local, 3)
-    rng_local = random.split(rng_local)[0]
-    params_flat, opt_state, loss = update(params_flat, opt_state, keys)
+    key1, key2, rng_local = random.split(rng_local, 3)
+    params_flat, opt_state, loss = update(params_flat, opt_state, (key1, key2))
     step_count = 1
     last_loss = float(loss)
 
@@ -268,9 +274,8 @@ def train(rng, eval_callback: Callable[[Any, int, float], None] | None = None):
     for it in range(1, MAX_ITER):
         if time.time() > deadline:
             break
-        rng_local, sub = random.split(rng_local)
-        keys = random.split(sub, 3)
-        params_flat, opt_state, loss = update(params_flat, opt_state, keys)
+        key1, key2, rng_local = random.split(rng_local, 3)
+        params_flat, opt_state, loss = update(params_flat, opt_state, (key1, key2))
         step_count = it + 1
         last_loss = float(loss)
         if eval_callback is not None and (it % 1000 == 0):

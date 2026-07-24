@@ -2,7 +2,7 @@
 
 Goal: drive rRMSE down on the current task in `task/problem.md` by
 running **blocks** in series. A block = one autonomous subagent
-(**Opus 4.8**) + 7200 s of GPU-run wall time + one written summary.
+(**Opus 4.8**) + 3600 s of GPU-run wall time + one written summary.
 Knowledge compounds through the summaries, not through orchestrator
 state.
 
@@ -95,7 +95,7 @@ package that honors it plugs in without framework changes:
 - `task/eval.py` — the single evaluation tool, CLI:
   `eval.py blocks/bNN/<file>.py [--gpu G] [--seed S] [--smoke | --diag]`.
   It must: enforce the per-block budget (`FORGE_WALL_BUDGET`, default
-  7200 wall-seconds across all GPU runs, concurrency-safe; CPU
+  3600 wall-seconds across all GPU runs, concurrency-safe; CPU
   `--smoke` free; `--diag` runs an arbitrary block-owned script on
   GPU, metered the same way); append one JSON record per run to
   `blocks/bNN/evals.jsonl` with at least `smoke: bool`, `diag: bool`

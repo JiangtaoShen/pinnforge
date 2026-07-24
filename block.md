@@ -1,7 +1,7 @@
 # PINNForge Block Charter
 
 You are **one block** in PINNForge's serial pipeline: an autonomous
-research unit designing PINN solvers, with a budget of **7200 s of
+research unit designing PINN solvers, with a budget of **3600 s of
 GPU-run wall time**. Push the best rRMSE below what previous blocks
 reached.
 
@@ -23,9 +23,13 @@ Literature, analysis and diagnostics beat blind iteration on the
 current best:
 
 - **Your starting point is a choice.** Weigh the literature and the
-  results so far, then declare in your summary which candidate you
-  fork from and why. The champion is the default answer, not
-  necessarily the right one.
+  results so far, then declare which candidate you fork from and
+  why.
+- **Balance between global exploration and local exploitation.**
+  When recent blocks yield only marginal improvement, use your own
+  judgment on whether the line is exhausted; if it is, stop
+  polishing it and fork from before the plateau or start a new root
+  in a different method family.
 - **Reflect as you go.** After each eval, ask what the result actually
   says about the direction, and think it through against kb1 and kb2
   before deciding the next move.
@@ -61,7 +65,7 @@ One full evaluation = one GPU training run + rRMSE scoring:
 
 - Appends a JSON record to `blocks/bNN/evals.jsonl`, saves trained
   params to `blocks/bNN/<name>.pkl`, prints the record.
-- **Budget:** 7200 s of wall time across all GPU runs
+- **Budget:** 3600 s of wall time across all GPU runs
   (`FORGE_WALL_BUDGET`), crashes included; enforced by the tool. Each
   run is wall-capped at the task's per-run budget (`problem.md`).
 - **Diagnostics:** free-form; on GPU it costs budget

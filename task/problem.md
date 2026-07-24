@@ -1,4 +1,4 @@
-# KS — Kuramoto–Sivashinsky
+# LDC — Lid-Driven Cavity
 
 **Solve the PDE with a genuine physics-informed neural network (PINN).
 The space/time derivatives entering the PDE residual come from automatic
@@ -8,31 +8,42 @@ itself.**
 
 ## Equation
 
-Scaled Kuramoto–Sivashinsky equation for $u(t, x)$:
+2D steady incompressible Navier-Stokes for $u(x, y)$, $v(x, y)$, $p(x, y)$:
 
 $$
-u_t + \nu_1\, u\, u_x + \nu_2\, u_{xx} + \nu_3\, u_{xxxx} = 0
+\begin{aligned}
+u \, u_x + v \, u_y + p_x - \nu (u_{xx} + u_{yy}) &= 0 \\
+u \, v_x + v \, v_y + p_y - \nu (v_{xx} + v_{yy}) &= 0 \\
+u_x + v_y &= 0
+\end{aligned}
 $$
 
-where $\nu_1 = 6.25$, $\nu_2 = 0.390625$, $\nu_3 \approx 1.526 \times 10^{-3}$
-(the scaled coefficients $100/16$, $100/16^2$, $100/16^4$).
+where $u, v$ are the velocity components and $p$ the pressure (all
+dimensionless), with $\nu = 1/\text{Re}$, $\text{Re} = 3200$
+($\nu \approx 3.125 \times 10^{-4}$).
 
 ## Domain
 
-$(t, x) \in [0, 0.4] \times [0, 2\pi]$.
+Unit square cavity: $(x, y) \in [0, 1] \times [0, 1]$.
 
 ## Boundary conditions
 
-Periodic in $x$: $u(t, 0) = u(t, 2\pi)$ (and all $x$-derivatives).
+| Edge | $u$ | $v$ |
+|---|---|---|
+| Top ($y = 1$) | $1$ | $0$ |
+| Bottom ($y = 0$) | $0$ | $0$ |
+| Left ($x = 0$) | $0$ | $0$ |
+| Right ($x = 1$) | $0$ | $0$ |
 
 ## Initial condition
 
-$u(0, x)$ is the reference profile at $t = 0$, supplied as
-`task/ks_ic.csv`.
+None (steady-state problem; no time variable).
 
 ## Scoring
 
-Score is the relative L2 error (rRMSE) on $u$. Lower is better.
+Score is the relative L2 error (rRMSE) on the velocity field $[u; v]$.
+Lower is better. Boundary predictions are replaced by the known BC values
+before scoring.
 
 ## Environment
 
@@ -41,6 +52,6 @@ pinned in `pyproject.toml`; extensions via `uv add` if the pins survive.
 
 ## Time budget
 
-**300 s of wall clock for the whole training process** (`TRAIN_TIME =
-300.0`, frozen header — mechanics and margin discipline live in
+**150 s of wall clock for the whole training process** (`TRAIN_TIME =
+150.0`, frozen header — mechanics and margin discipline live in
 `baseline.py`).
