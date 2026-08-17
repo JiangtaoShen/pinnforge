@@ -263,3 +263,59 @@ def test_crashed_workspace_is_readopted_with_recovery_instructions(project):
     _orch(run, rt).run_blocks(1)
     assert rt.calls[0]["block_id"] == "b01", "the crashed id is re-adopted, not skipped"
     assert "already exists from a crashed run" in rt.calls[0]["prompt"]
+
+
+# ─────────────────── the anchor is not a block ───────────────────
+
+
+def _anchor_without_summary(run: Path) -> None:
+    """A restored anchor as most tasks actually have one.
+
+    `anchor.save` copies a `b00.md` only when the run it came from had one, so
+    a cached anchor normally carries the candidate, its params, the records and
+    the spent budget — and no summary at all. Of the four library tasks only
+    `ldc` has one, which is why the fixture above is the exception rather than
+    the rule.
+    """
+    _finish(run, "b00", wall=146.0, score=0.94)
+    (run / "blocks" / "kb2" / "b00.md").unlink()
+
+
+def test_an_anchor_without_a_summary_is_still_complete(project):
+    """The control node is judged on its measurement, not on a kb2 write-up.
+
+    Requiring a summary made every such anchor look like a crashed block, and
+    the loop then spent the run's first block sending an agent — on the full
+    charter, with a full GPU budget — to "finish" the very node every other
+    block is measured against.
+    """
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    _anchor_without_summary(run)
+    cfg = RunConfig.load(paths.config_path(run))
+
+    v = verify_block(run, "b00", cfg, 150.0)
+    assert v.done, "a measured anchor is complete without a summary"
+    assert not v.has_summary
+    assert v.scored_evals == 1
+
+
+def test_an_anchor_without_a_summary_is_not_dispatched(project):
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    _anchor_without_summary(run)
+
+    rt = StubRuntime(lambda r, b, n: _finish(r, b))
+    done = _orch(run, rt).run_blocks(1)
+
+    assert [c["block_id"] for c in rt.calls] == ["b01"], "b00 must never be dispatched"
+    assert done == ["b01"], "the run's blocks must not be spent on the anchor"
+
+
+def test_b00_is_never_selected_even_when_it_looks_unfinished(project):
+    """Defence in depth: whatever any verdict says, the anchor is not a block."""
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    paths.block_dir(run, "b00").mkdir(parents=True)  # worst case: an empty anchor
+
+    rt = StubRuntime(lambda r, b, n: _finish(r, b))
+    _orch(run, rt).run_blocks(1)
+
+    assert [c["block_id"] for c in rt.calls] == ["b01"]

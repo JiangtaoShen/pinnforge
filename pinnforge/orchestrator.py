@@ -89,12 +89,26 @@ def verify_block(run: Path, block_id: str, cfg: RunConfig, per_run_wall: float) 
     """
     recs = EvalRecord.read_all(paths.evals_path(run, block_id))
     spent = charged_seconds(recs, paths.budget_path(run, block_id))
-    # b00 is the control node: one measurement of the baseline as-is, not a
-    # block that has to spend a budget. Holding it to the budget threshold
-    # would send the loop off to "finish" an anchor that is already complete.
-    threshold = 0.0 if block_id == "b00" else max(0.0, cfg.sandbox.wall_budget_s - per_run_wall)
     has_summary = paths.summary_path(run, block_id).is_file()
     scored = sum(1 for r in recs if r.scored)
+
+    # b00 is the control node: `baseline.py` measured as-is by anchor.ensure(),
+    # not a block that spends a budget or writes a summary. Its evidence is the
+    # measurement, so that is all it is judged on. Holding it to the budget
+    # would send the loop off to "finish" an anchor that is already complete —
+    # and so would requiring a summary, because a cached anchor need not carry
+    # one: only a task whose b00 was once written up by an agent has a `b00.md`
+    # to restore, and the rest would look unfinished forever.
+    if block_id == "b00":
+        return BlockVerdict(
+            done=scored >= 1,
+            spent=spent,
+            budget=0.0,
+            has_summary=has_summary,
+            scored_evals=scored,
+        )
+
+    threshold = max(0.0, cfg.sandbox.wall_budget_s - per_run_wall)
     return BlockVerdict(
         done=has_summary and spent >= threshold and scored >= 1,
         spent=spent,
@@ -253,8 +267,13 @@ class Orchestrator:
 
         Re-adopting beats allocating a fresh id: the crashed workspace holds
         evaluations that were already paid for in GPU time.
+
+        b00 is never a candidate. It is installed by `anchor.ensure()` and is
+        the control node every other block is measured against — dispatching an
+        agent onto it would spend one of the run's blocks rewriting the
+        yardstick.
         """
-        ids = layout.existing_block_ids(self.run)
+        ids = [b for b in layout.existing_block_ids(self.run) if b != "b00"]
         if ids and not verify_block(self.run, ids[-1], self.cfg, self.per_run_wall).done:
             return ids[-1]
         return layout.next_block_id(self.run)
