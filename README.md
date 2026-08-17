@@ -5,7 +5,7 @@ Knowledge-centric multi-agent system for autonomous PINN design.
 A **block** is one autonomous coding agent, a fixed GPU-wall budget, and one
 written summary. Blocks run in series; knowledge compounds through the
 summaries, not through orchestrator state. The orchestrator is a plain Python
-process — whether a block is finished is a question the filesystem answers, so
+process: whether a block is finished is a question the filesystem answers, so
 no model is asked to decide it.
 
 ## Install
@@ -36,7 +36,7 @@ pinnforge run audit ks_1                  # did any block alter another's record
 
 `run start` freezes the task, installs the b00 anchor, then dispatches blocks
 one at a time. Every state change is checkpointed to `runs/<id>/state.json`, so
-Ctrl-C, a reboot and a dead harness all end the same way — `run resume` re-reads
+Ctrl-C, a reboot and a dead harness all end the same way: `run resume` re-reads
 the checkpoint and the on-disk evidence and carries on. A block counts as
 finished only when its summary exists, its budget is spent, and at least one
 real evaluation is logged. An interrupt takes the block's whole process group
@@ -47,7 +47,7 @@ live.
 
 | Path | Role |
 |---|---|
-| `tasks/<name>/` | task library — the three contract files, public data, and the answers under `private/` |
+| `tasks/<name>/` | task library: the three contract files, public data, and the answers under `private/` |
 | `runs/<task>_<n>/` | one run: frozen task copy, `blocks/bNN/`, `blocks/kb2/`, ledger, logs |
 | `pinnforge/kb1/` | corpus of paper notes (`INDEX.md` is the map); a `kb1/` at the project root overrides it |
 | `pinnforge/prompts/block.md.template` | the block charter; `charter/block.md.template` at the project root overrides it |
@@ -80,7 +80,7 @@ pinnforge run start -t ldc --model claude-opus-5
 quietly stop being comparable. Whatever was asked for, the id the harness
 *actually ran* is read back out of its log into `run_usage.jsonl`, `state.json`
 and the summary. For a harness this repo has never heard of, point
-`agent.runtime` at `module.path:ClassName` — anything implementing the
+`agent.runtime` at `module.path:ClassName`. Anything implementing the
 `AgentRuntime` protocol in `pinnforge/runtime/base.py` works.
 
 ## Sandbox and GPUs
@@ -99,15 +99,15 @@ pinnforge run start -t ks --set sandbox.command_prefix='["firejail","--"]'
 ```
 
 `command_prefix` applies to the whole process tree, so everything the agent
-spawns — shells, `eval.py`, the training worker — inherits it.
+spawns inherits it: shells, `eval.py`, the training worker.
 
 ## Scoring, and the record
 
 rRMSE is not computed inside `eval.py`. `eval.py` trains and predicts on a
 public grid, then files the predictions on a queue; a separate **score service**
 compares them against the reference and files the score back. It never executes
-agent code, so the reference can live where a block cannot read it — a boundary
-rather than a rule. `run start` serves the queue in-process; to make the
+agent code, so the reference can live where a block cannot read it. That is a
+boundary rather than a rule. `run start` serves the queue in-process; to make the
 isolation an OS fact, keep the references outside the repo and serve them as
 another user:
 
@@ -118,9 +118,9 @@ pinnforge scored ks_1 --private /srv/pinnforge-private   # or FORGE_PRIVATE_DIR
 `tasks/*/private/` is `.gitignore`d for the same reason: a clone can train, but
 cannot score until the references are supplied.
 
-Every dispatch is bracketed by a hash of what the block must leave alone —
-earlier evaluations and summaries, the task package, the charter, the corpus —
-and the verdict lands in `runs/<id>/.integrity/` for `run audit` to read back.
+Every dispatch is bracketed by a hash of what the block must leave alone:
+earlier evaluations and summaries, the task package, the charter, the corpus.
+The verdict lands in `runs/<id>/.integrity/` for `run audit` to read back.
 This detects rather than prevents, deliberately: a jail would have to enumerate
 every path a block legitimately writes, and missing one turns a working block
 into a failing one.
@@ -141,13 +141,13 @@ pinnforge task smoke burgers               # free CPU dress rehearsal, end to en
 pinnforge task anchor burgers --measure    # the b00 score every block must beat
 ```
 
-The smoke passes only on a record carrying a score and no error — `eval.py`
+The smoke passes only on a record carrying a score and no error. `eval.py`
 exits 0 whenever a record was *written*, failed runs included, so the exit
 status proves nothing.
 
 `task anchor` on its own only reports: the cached score, and whether the
 contract files still fingerprint to what it was measured against. **Judge
-staleness by that fingerprint, never by the score** — the same task re-measured
+staleness by that fingerprint, never by the score.** The same task re-measured
 at the same seed moves anywhere from 0.4% to 17%, because training stops on a
 wall clock and the run is not bit-deterministic.
 
@@ -165,8 +165,8 @@ pinnforge kb1 add --source ~/papers/new --prompt "distil these three"
 pinnforge kb1 check
 ```
 
-Nodes are `NNN_YYYY_Title.md` with four sections — TL;DR, Problem, Method,
-Results — where Method carries runnable JAX, because a block will copy it.
+Nodes are `NNN_YYYY_Title.md` with four sections (TL;DR, Problem, Method,
+Results), where Method carries runnable JAX, because a block will copy it.
 `kb1 check` validates shape *and* size: the 130 hand-written nodes run 3.6–6.3
 KB, and one far outside that band has either padded past what a block can afford
 to read or dropped the Method that made it worth opening.
@@ -176,21 +176,21 @@ to read or dropped the Method that made it worth opening.
 The framework touches a task only through this interface, so any package
 honouring it plugs in without framework changes.
 
-* **`problem.md`** — the task definition, and the only prose a block reads.
+* **`problem.md`**: the task definition, and the only prose a block reads.
   Seven fixed sections in a fixed order, so an agent on its second task already
   knows where to look.
-* **`baseline.py`** — the root candidate. Defines the frozen `PDE CONSTANTS`
+* **`baseline.py`**: the root candidate. Defines the frozen `PDE CONSTANTS`
   header and the `train(rng, eval_callback=None) -> (params, step_count)` /
   `predict_fn(params, X) -> dict` contract every descendant keeps.
-* **`eval.py`** — the single evaluation tool:
+* **`eval.py`**: the single evaluation tool,
   `eval.py blocks/bNN/<file>.py [--gpu G] [--seed S] [--smoke | --diag]`.
   Enforces `FORGE_WALL_BUDGET` across GPU runs (CPU `--smoke` is free), appends
   one JSON record per run to `blocks/bNN/evals.jsonl` carrying `smoke`, `diag`,
-  `wall_s` and `rRMSE` — the primary metric, lower is better — maintains
+  `wall_s` and `rRMSE` (the primary metric, lower is better), maintains
   `.budget`, saves params beside the candidate, and exits 0 whenever a record
   was written.
-* **Public data** — geometry, level sets, initial conditions, the prediction
-  grid — sits in the task directory and is copied into every run. The scoring
+* **Public data** (geometry, level sets, initial conditions, the prediction
+  grid) sits in the task directory and is copied into every run. The scoring
   truth sits in `private/`, which is never copied: the installer takes files
   only, so secrecy is a matter of where a file sits, not what it is named.
 
