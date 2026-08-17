@@ -10,6 +10,7 @@ environment is gone.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -499,3 +500,57 @@ def test_a_violation_is_not_overwritten_by_complete(project):
     bs = orch.state.blocks["b02"]
     assert bs.status == "done"
     assert "integrity" in bs.exit_reason, f"the violation was hidden: {bs.exit_reason!r}"
+
+
+def test_a_readopted_block_is_not_reported_stalled_immediately(project, monkeypatch):
+    """Silence is measured from this dispatch, not from the workspace's mtimes.
+
+    A re-adopted block carries the mtimes of the segment that stopped hours
+    ago, so measuring from those made every resume cry wolf on its first poll:
+    ldc_4's b02 was reported "quiet for 82 min" sixty seconds after it was
+    dispatched, while it was in fact working and went on to finish.
+    """
+    import logging
+    import time as _time
+
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    _anchor(run)
+    d = paths.block_dir(run, "b01")
+    d.mkdir(parents=True, exist_ok=True)
+    stale = d / "old.py"
+    stale.write_text("# from hours ago\n", encoding="utf-8")
+    long_ago = _time.time() - 6 * 3600
+    os.utime(stale, (long_ago, long_ago))
+    os.utime(d, (long_ago, long_ago))
+
+    cfg = RunConfig.load(paths.config_path(run))
+    orch = Orchestrator(run, cfg, RunState.load(paths.state_path(run)))
+    orch.cfg.poll_seconds = 0  # one immediate poll, then the handle reports exit
+
+    class OneShot:
+        log_path = run / "logs" / "x.log"
+        _n = 0
+
+        @property
+        def alive(self):
+            return OneShot._n < 2
+
+        def wait(self, timeout=None):
+            OneShot._n += 1
+            return None if OneShot._n < 2 else 0
+
+        def close(self):
+            pass
+
+    with pytest.MonkeyPatch.context():
+        records = []
+        handler = logging.Handler()
+        handler.emit = records.append
+        logging.getLogger("pinnforge.orchestrator").addHandler(handler)
+        try:
+            orch._await(OneShot(), "b01")
+        finally:
+            logging.getLogger("pinnforge.orchestrator").removeHandler(handler)
+
+    stalls = [r for r in records if "quiet for" in r.getMessage()]
+    assert not stalls, f"a freshly dispatched block must not read as stalled: {stalls}"
