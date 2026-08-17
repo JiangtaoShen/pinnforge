@@ -205,3 +205,37 @@ def test_client_gives_up_before_the_eval_wall():
         f"WAIT_S={scoring.WAIT_S} must be below the tightest EVAL_WALL_S "
         f"({tightest} in {min(walls, key=walls.get)}); walls={walls}"
     )
+
+
+def test_a_finished_exchange_leaves_no_queue_files(tmp_path, monkeypatch):
+    """Every run used to keep the results of its last hour.
+
+    `_collect` only sweeps files already an hour old and the daemon stops with
+    the run, so the tail of every run's scoring was never cleaned: 8, 16, 37
+    and 19 orphaned `res/*.json` in the four runs this was found on. The client
+    deleted its request and left the answer.
+    """
+    import numpy as np
+
+    from pinnforge import scoring
+
+    run = tmp_path / "runs" / "toy_1"
+    run.mkdir(parents=True)
+    _, req, res = scoring.queue_dirs(run)
+
+    pred = tmp_path / "pred.npz"
+    np.savez(pred, u=np.zeros(4))
+
+    # answer the request the moment it lands, the way the daemon does
+    def fake_sleep(_):
+        for jf in req.glob("*.json"):
+            (res / jf.name).write_text(
+                '{"rRMSE": 0.5, "MSE": 0.25, "error": null}', encoding="utf-8"
+            )
+
+    monkeypatch.setattr(scoring.time, "sleep", fake_sleep)
+    out = scoring.submit_score(run, {"task": "toy", "run": "toy_1", "block": "b01"}, pred, wait_s=5)
+
+    assert out["rRMSE"] == 0.5
+    assert list(req.iterdir()) == [], "the request and its payload must go"
+    assert list(res.iterdir()) == [], "and so must the answer the client consumed"

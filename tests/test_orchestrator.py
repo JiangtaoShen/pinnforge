@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from pinnforge import paths
+from pinnforge import integrity, paths
 from pinnforge.config import RunConfig
 from pinnforge.orchestrator import EnvironmentFailure, Orchestrator, verify_block
 from pinnforge.run import layout, ledger
@@ -319,3 +319,155 @@ def test_b00_is_never_selected_even_when_it_looks_unfinished(project):
     _orch(run, rt).run_blocks(1)
 
     assert [c["block_id"] for c in rt.calls] == ["b01"]
+
+
+# ─────────────── an interrupted segment still books its cost ───────────────
+
+
+def _partial(run: Path, block_id: str) -> None:
+    """What a block that was working when it got interrupted leaves behind.
+
+    Records and spent budget, no summary — the shape b03 was in when the run
+    this test came from was stopped.
+    """
+    d = run / "blocks" / block_id
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "evals.jsonl").write_text(
+        json.dumps(
+            {
+                "block": block_id,
+                "candidate": f"blocks/{block_id}/{block_id}_v1.py",
+                "smoke": False,
+                "diag": False,
+                "wall_s": 900.0,
+                "rRMSE": 0.088,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (d / ".budget").write_text("900", encoding="utf-8")
+
+
+class UsageReportingStub(StubRuntime):
+    """A harness that reports accounting, the way a real one does."""
+
+    def extract_usage(self, log_path):
+        from pinnforge.runtime.base import AgentUsage
+
+        return AgentUsage(tokens=284_403, tool_uses=94, cost_usd=10.88, model="stub-resolved")
+
+
+def test_an_interrupted_segment_still_books_what_it_cost(project, monkeypatch):
+    """Ctrl-C used to throw away the block's whole model spend.
+
+    Found on a real run: the block had been going an hour and had 2832 GPU
+    seconds and 15 evaluations to show for it, but `run_usage.jsonl` had no
+    line for it at all and the summary printed a dash where the money went.
+    The GPU seconds survived because eval.py writes those itself; everything
+    the orchestrator was responsible for booking was lost, because it was
+    booked only after the wait returned normally.
+    """
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    _anchor(run)
+    orch = _orch(run, UsageReportingStub(lambda r, b, n: _partial(r, b)))
+
+    def interrupted(self, handle, block_id):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Orchestrator, "_await", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        orch.run_blocks(1)
+
+    lines = [
+        json.loads(ln)
+        for ln in paths.ledger_path(run).read_text(encoding="utf-8").splitlines()
+        if ln.strip()
+    ]
+    assert [r["block"] for r in lines] == ["b01"], "the interrupted segment must reach the ledger"
+    assert lines[0]["tokens"] == 284_403
+    assert lines[0]["cost_usd"] == 10.88
+    assert lines[0]["model_resolved"] == "stub-resolved"
+    # duration is not asserted above zero: this interrupt fires instantly, so
+    # the segment really did last under a millisecond. What matters is that the
+    # line exists at all — it did not, before.
+    assert "duration_ms" in lines[0]
+
+    _, _, state = layout.load_run(run.name)
+    bs = state.blocks["b01"]
+    assert bs.status == "interrupted", f"a stale 'running' misreports a dead block: {bs.status}"
+    assert "interrupted" in bs.exit_reason
+    assert bs.model_resolved == "stub-resolved"
+
+
+def test_the_summary_shows_an_interrupted_block_rather_than_a_dash(project, monkeypatch):
+    """The row was there, but every column the orchestrator fills was a dash."""
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    _anchor(run)
+    orch = _orch(run, UsageReportingStub(lambda r, b, n: _partial(r, b)))
+    monkeypatch.setattr(
+        Orchestrator,
+        "_await",
+        lambda self, handle, block_id: (_ for _ in ()).throw(KeyboardInterrupt),
+    )
+    with pytest.raises(KeyboardInterrupt):
+        orch.run_blocks(1)
+
+    row = next(r for r in ledger.block_rows(run) if r["block"] == "b01")
+    assert row["tokens"] == 284_403, "the summary showed a dash here"
+    assert row["model"] == "stub-resolved"
+    assert row["segments"] == 1
+    assert row["wall_s"] == 900.0, "GPU seconds always survived; they come from eval.py"
+
+
+def test_an_interrupted_dispatch_is_still_verified(project, monkeypatch):
+    """A manifest with no verdict is a hole in what `run audit` reports.
+
+    `run audit` counts verdicts, so an unverified dispatch does not show up as
+    unchecked — it shows up as not having happened, and the run reads as fully
+    audited when part of it never was. Seen on naca_1: three dispatches, a
+    b03.0.json manifest, no b03.0.result.json, and audit reporting "2 dispatch
+    segment(s) verified".
+    """
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    _anchor(run)
+    orch = _orch(run, UsageReportingStub(lambda r, b, n: _partial(r, b)))
+    monkeypatch.setattr(
+        Orchestrator,
+        "_await",
+        lambda self, handle, block_id: (_ for _ in ()).throw(KeyboardInterrupt),
+    )
+    with pytest.raises(KeyboardInterrupt):
+        orch.run_blocks(1)
+
+    manifests = sorted(p.name for p in (run / ".integrity").glob("b01.*.json"))
+    assert "b01.0.json" in manifests
+    assert "b01.0.result.json" in manifests, "the interrupted dispatch was never verified"
+    report = integrity.audit(run)
+    assert report["segments_checked"] == 1
+    assert report["clean"]
+
+
+def test_a_violation_is_not_overwritten_by_complete(project):
+    """A block that altered another's record must not read as complete.
+
+    The verdict on disk was always right — `run audit` reads that — but
+    state.json's exit_reason was set to "complete" straight after, so anything
+    reading the checkpoint saw a clean finish.
+    """
+    run = layout.create_run(RunConfig(task="ldc", blocks=2))
+    _anchor(run)
+    _finish(run, "b01", score=0.4)
+
+    def tamper_then_finish(r, b, n):
+        # rewrite an earlier block's ledger, which the charter forbids
+        (r / "blocks" / "b01" / "evals.jsonl").write_text("{}\n", encoding="utf-8")
+        _finish(r, b)
+
+    orch = _orch(run, StubRuntime(tamper_then_finish))
+    orch.run_blocks(1)
+
+    assert integrity.audit(run)["clean"] is False
+    bs = orch.state.blocks["b02"]
+    assert bs.status == "done"
+    assert "integrity" in bs.exit_reason, f"the violation was hidden: {bs.exit_reason!r}"

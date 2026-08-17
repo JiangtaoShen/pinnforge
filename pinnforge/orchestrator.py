@@ -241,6 +241,49 @@ class Orchestrator:
             raise
         handle.close()
 
+    def _record_segment(self, handle: AgentHandle, block_id: str, started: float) -> int:
+        """Book what this dispatch cost. Called on every exit path, interrupt included.
+
+        The GPU seconds survive on their own — `eval.py` writes them to
+        `.budget` as it charges them — but the model spend lives only in the
+        harness's log until it is read out here. Booking it after the wait
+        returned normally meant a block interrupted mid-segment left its whole
+        spend out of the ledger: an hour of tokens and cost, with the summary
+        printing a dash where the money went, next to GPU seconds that proved
+        the work had happened.
+        """
+        elapsed_ms = int((time.time() - started) * 1000)
+        usage = _usage_of(self.runtime, handle.log_path)
+        bs = self.state.blocks[block_id]
+        bs.session_id = self.runtime.extract_session_id(handle.log_path) or bs.session_id
+        bs.duration_ms += elapsed_ms
+        # An alias is not a model. Two runs a generation apart both say
+        # "opus"; only the resolved id says which one actually ran.
+        bs.model_resolved = usage.model or bs.model_resolved
+        self._save()
+        ledger.append_usage(
+            self.run, block_id, self.runtime.name, self.model, elapsed_ms, usage
+        )
+
+    def _check_integrity(self, block_id: str, segment: int, manifest: integrity.Manifest) -> list:
+        """Verify the manifest and record the verdict. Every exit path, interrupt included.
+
+        A dispatch that ended in an interrupt could have altered the record
+        before it was stopped, and a segment with a manifest but no verdict is
+        a hole in the artefact `run audit` reads: it counts verdicts, so an
+        unverified dispatch makes the run look smaller and fully checked rather
+        than partly unchecked.
+        """
+        violations = integrity.verify(self.run, manifest)
+        integrity.record_result(self.run, block_id, segment, violations)
+        if violations:
+            for v in violations:
+                logger.error("block %s violated the record — %s", block_id, v)
+            self.state.blocks[block_id].exit_reason = (
+                f"integrity: {len(violations)} violation(s) in segment {segment}"
+            )
+        return violations
+
     # ──────────────────────────── the loop ────────────────────────────
 
     def run_blocks(self, n: int) -> list[str]:
@@ -300,41 +343,38 @@ class Orchestrator:
 
             started = time.time()
             handle = self._dispatch(block_id, prompt, resume_session)
-            self._await(handle, block_id)
-            elapsed_ms = int((time.time() - started) * 1000)
-
-            violations = integrity.verify(self.run, manifest)
-            integrity.record_result(self.run, block_id, segment, violations)
-            if violations:
-                for v in violations:
-                    logger.error("block %s violated the record — %s", block_id, v)
-                self.state.blocks[block_id].exit_reason = (
-                    f"integrity: {len(violations)} violation(s) in segment {segment}"
-                )
-
-            sid = self.runtime.extract_session_id(handle.log_path)
-            usage = _usage_of(self.runtime, handle.log_path)
+            try:
+                self._await(handle, block_id)
+            except BaseException:
+                # An interrupt is a normal end state — the README promises
+                # Ctrl-C, a reboot and a dead harness all end the same way —
+                # so the segment's accounting has to survive one. The GPU
+                # seconds do already, because eval.py writes them to `.budget`
+                # as it charges them; the model spend lives only in the
+                # harness's log until it is read out here, and a block
+                # interrupted mid-segment used to leave an hour of tokens and
+                # cost out of the ledger entirely.
+                self._record_segment(handle, block_id, started)
+                self._check_integrity(block_id, segment, manifest)
+                bs = self.state.blocks[block_id]
+                bs.status = "interrupted"
+                # an integrity verdict, if there was one, outranks this
+                bs.exit_reason = bs.exit_reason or f"interrupted during segment {segment}"
+                self._save()
+                ledger.write_run_summary(self.run)
+                raise
+            self._record_segment(handle, block_id, started)
+            violations = self._check_integrity(block_id, segment, manifest)
             bs = self.state.blocks[block_id]
-            bs.session_id = sid or bs.session_id
-            bs.duration_ms += elapsed_ms
-            # An alias is not a model. Two runs a generation apart both say
-            # "opus"; only the resolved id says which one actually ran.
-            bs.model_resolved = usage.model or bs.model_resolved
-            self._save()
-            ledger.append_usage(
-                self.run,
-                block_id,
-                self.runtime.name,
-                self.model,
-                elapsed_ms,
-                usage,
-            )
 
             verdict = verify_block(self.run, block_id, self.cfg, self.per_run_wall)
             if verdict.done:
                 bs.status = "done"
                 bs.completed_at = utcnow()
-                bs.exit_reason = "complete"
+                # "complete" used to overwrite the integrity verdict, so a block
+                # that altered another's record still read as clean in state.json
+                if not violations:
+                    bs.exit_reason = "complete"
                 self._save()
                 self._relay(block_id, verdict)
                 return True
