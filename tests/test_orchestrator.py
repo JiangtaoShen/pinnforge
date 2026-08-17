@@ -222,13 +222,41 @@ def test_dead_gpu_stops_the_run_instead_of_retrying(project, monkeypatch):
 
 
 def test_hopeless_block_is_abandoned_not_looped_forever(project):
+    """Two dispatches, not six: the second bought nothing the first had not.
+
+    MAX_SEGMENTS is the backstop for a block that keeps inching forward and
+    never arrives. An agent that produces the same evidence twice has decided
+    it is finished, and the remaining segments would be the same exchange
+    again.
+    """
     run = layout.create_run(RunConfig(task="ldc", blocks=1))
     _anchor(run)
     rt = StubRuntime(lambda r, b, n: None)  # writes nothing, ever
     orch = _orch(run, rt)
     assert orch.run_blocks(1) == []
-    assert orch.state.blocks["b01"].status == "failed"
-    assert len(rt.calls) == 6  # MAX_SEGMENTS
+    assert orch.state.blocks["b01"].status == "failed", "nothing usable was produced"
+    assert len(rt.calls) == 2
+
+
+def test_a_block_that_stops_just_short_is_short_not_failed(project):
+    """`failed` has to mean "produced nothing", or the summary libels the run.
+
+    ldc_4's b02 was recorded as failed while holding the best score in the run,
+    a written summary and 23 scored evaluations — it had simply stopped 104 s
+    shy of the budget threshold, and four further dispatches in 42 seconds
+    could not move it.
+    """
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    _anchor(run)
+    # spends almost all of the 3450 s threshold, writes a summary, then insists
+    rt = StubRuntime(lambda r, b, n: _finish(r, b, wall=3346.0, score=0.29))
+    orch = _orch(run, rt)
+
+    assert orch.run_blocks(1) == [], "the budget still decides `done`"
+    bs = orch.state.blocks["b01"]
+    assert bs.status == "short", f"a usable block must not read as failed: {bs.status}"
+    assert "short of the budget" in bs.exit_reason
+    assert len(rt.calls) == 2, "and it must not be re-dispatched four more times"
 
 
 def test_interrupted_run_resumes_from_the_checkpoint(project):
