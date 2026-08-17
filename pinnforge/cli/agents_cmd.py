@@ -11,9 +11,10 @@ def cmd_list(args) -> int:
     print(f"{'runtime':<14} {'command':<14} {'default model':<16} installed")
     for row in registry.detect_available():
         mark = row["path"] or "—"
-        print(
-            f"{row['runtime']:<14} {row['command']:<14} {row['default_model']:<16} {mark}"
-        )
+        # A harness that names no default requires one per run; say so rather
+        # than printing a blank column that reads like missing information.
+        model = row["default_model"] or "(pass --model)"
+        print(f"{row['runtime']:<14} {row['command']:<14} {model:<16} {mark}")
     return 0
 
 

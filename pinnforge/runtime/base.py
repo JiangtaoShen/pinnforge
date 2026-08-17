@@ -231,7 +231,16 @@ class AgentRuntime(Protocol):
         ...
 
     @property
-    def default_model(self) -> str: ...
+    def default_model(self) -> str:
+        """The id used when a run pins none, or `""` to require one.
+
+        Empty is a refusal, not "unpinned": a harness fronting many providers
+        cannot guess an id that suits someone else's account, and a guess that
+        runs is worse than one that does not, because the ledger records it as
+        though it were chosen. `registry.resolve_model` turns an empty default
+        into an error before a run is built.
+        """
+        ...
 
     @property
     def default_command(self) -> str: ...

@@ -145,7 +145,7 @@ class Orchestrator:
         self.state = state
         self.root = root or paths.project_root()
         self.runtime = runtime_registry.get_runtime(cfg.agent.runtime)
-        self.model = cfg.agent.model or self.runtime.default_model
+        self.model = runtime_registry.resolve_model(self.runtime, cfg.agent.model)
         self.per_run_wall = contract.train_time(run / "task") or 0.0
 
     # ──────────────────────────── plumbing ────────────────────────────
