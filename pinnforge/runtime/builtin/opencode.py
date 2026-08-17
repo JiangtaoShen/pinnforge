@@ -13,7 +13,13 @@ class OpenCodeRuntime:
 
     @property
     def default_model(self) -> str:
-        return "openai/gpt-5"
+        """None. OpenCode is a front-end to many providers, so there is no id
+        this adapter could pick that would be right for someone else's setup —
+        the previous `openai/gpt-5` was a guess, and a guess that runs is worse
+        than one that does not, because the ledger records it as though it were
+        chosen. A run on this harness names its model or does not start.
+        """
+        return ""
 
     @property
     def default_command(self) -> str:
@@ -34,11 +40,17 @@ class OpenCodeRuntime:
         resume_session_id: str | None = None,
         command_prefix: list[str] | None = None,
     ) -> AgentHandle:
+        if not (model or "").strip():
+            raise ValueError(
+                "runtime 'opencode' has no default model; name one with "
+                "`--model <provider/id>` (e.g. --model anthropic/claude-opus-4-8) "
+                "or `--set agent.model=<provider/id>`"
+            )
         opts = runtime_options or {}
         cmd = [command or self.default_command, "run"]
         if resume_session_id:
             cmd += ["--session", resume_session_id]
-        cmd += ["--model", model or self.default_model, "--print-logs"]
+        cmd += ["--model", model, "--print-logs"]
         cmd += [str(a) for a in opts.get("extra_args") or []]
         cmd += [prompt]
         return spawn(

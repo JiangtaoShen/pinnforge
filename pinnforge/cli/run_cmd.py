@@ -9,6 +9,7 @@ from pinnforge import integrity, paths, scoring
 from pinnforge.config import AgentConfig, RunConfig, SandboxConfig, apply_overrides
 from pinnforge.orchestrator import EnvironmentFailure, Orchestrator, verify_block
 from pinnforge.run import anchor, layout, ledger
+from pinnforge.runtime import registry as runtime_registry
 from pinnforge.task import contract
 from pinnforge.types import EvalRecord, best_score
 
@@ -33,6 +34,10 @@ def cmd_start(args) -> int:
         level=logging.INFO, format="%(asctime)s  %(levelname)-7s %(message)s"
     )
     cfg = _build_config(args)
+    # Settle the model before anything is built: a harness that names no
+    # default has to be told one, and finding that out after the run directory
+    # and a measured anchor exist would cost a GPU for nothing.
+    runtime_registry.resolve_model(runtime_registry.get_runtime(cfg.agent.runtime), cfg.agent.model)
     # create_run adopts the task's declared per-block budget when the caller
     # did not ask for a different one.
     run = layout.create_run(cfg)

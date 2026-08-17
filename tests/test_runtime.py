@@ -88,11 +88,38 @@ def test_prompt_and_model_reach_the_cli(monkeypatch, name):
     assert seen["cwd"] == Path("/tmp/run")
 
 
-@pytest.mark.parametrize("name", ["claude_code", "codex", "cursor_agent", "opencode"])
+@pytest.mark.parametrize("name", ["claude_code", "codex", "cursor_agent"])
 def test_default_model_used_when_unpinned(monkeypatch, name):
     rt = registry.get_runtime(name)
     seen = _argv(monkeypatch, rt)
     assert rt.default_model in seen["cmd"]
+
+
+def test_opencode_refuses_to_start_without_a_model(monkeypatch):
+    """It fronts many providers, so any default this repo picked would be a guess.
+
+    A guess that runs is worse than one that does not: the ledger records it as
+    though it were chosen, and the run reads as pinned when nobody pinned it.
+    """
+    rt = registry.get_runtime("opencode")
+    assert rt.default_model == ""
+    with pytest.raises(ValueError, match="no default model"):
+        _argv(monkeypatch, rt)
+
+    seen = _argv(monkeypatch, rt, model="anthropic/claude-opus-4-8")
+    assert "anthropic/claude-opus-4-8" in seen["cmd"]
+
+
+def test_an_unpinned_run_is_refused_before_anything_is_built():
+    """The error has to arrive before a run directory and a measured anchor do."""
+    rt = registry.get_runtime("opencode")
+    with pytest.raises(ValueError, match="states no default model"):
+        registry.resolve_model(rt, "")
+    assert registry.resolve_model(rt, "anthropic/claude-opus-4-8") == (
+        "anthropic/claude-opus-4-8"
+    )
+    # a harness that does name one is unaffected
+    assert registry.resolve_model(registry.get_runtime("claude_code")) == "claude-opus-4-8"
 
 
 @pytest.mark.parametrize(
@@ -111,7 +138,8 @@ def test_unattended_mode_is_requested(monkeypatch, name, flag):
 
 @pytest.mark.parametrize("name", ["claude_code", "codex", "cursor_agent", "opencode"])
 def test_resume_token_is_passed_through(monkeypatch, name):
-    seen = _argv(monkeypatch, registry.get_runtime(name), resume_session_id="SID")
+    # pinned explicitly: opencode names no default and refuses to start without one
+    seen = _argv(monkeypatch, registry.get_runtime(name), model="M", resume_session_id="SID")
     assert "SID" in seen["cmd"], seen["cmd"]
 
 
@@ -247,12 +275,18 @@ def test_the_default_runtime_pins_an_exact_id_not_an_alias():
 def test_every_runtime_states_some_default():
     """`auto` is what one CLI calls "unpinned" — legitimate for that harness,
     and the reason the README tells the user to pass `--model` anyway. What is
-    not acceptable is a runtime that names no default at all, because then the
-    ledger records an empty string and the run cannot be reproduced."""
+    not acceptable is a run whose model nobody recorded: an empty id reaches the
+    ledger as an empty string and the run cannot be read against any other. A
+    harness may therefore state a default *or* refuse to start without one, but
+    it may not quietly run unpinned."""
     from pinnforge.runtime import registry
 
     for name in registry.known_runtimes():
-        assert registry.get_runtime(name).default_model.strip(), name
+        rt = registry.get_runtime(name)
+        if rt.default_model.strip():
+            continue
+        with pytest.raises(ValueError, match="states no default model"):
+            registry.resolve_model(rt, "")
 
 
 # ───────────────────── interrupting a live agent ─────────────────────

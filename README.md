@@ -68,7 +68,7 @@ with the same prompt, working directory and environment.
 | `claude_code` (default) | `claude` | `claude-opus-4-8` |
 | `codex` | `codex` | `gpt-5.4` |
 | `cursor_agent` | `cursor-agent` | `auto` |
-| `opencode` | `opencode` | `openai/gpt-5` |
+| `opencode` | `opencode` | none; pass `--model` |
 
 ```bash
 pinnforge run start -t ks --runtime codex --model gpt-5.4

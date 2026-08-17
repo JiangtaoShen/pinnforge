@@ -80,6 +80,26 @@ def get_runtime(name: str) -> AgentRuntime:
     return _RUNTIMES[key]()
 
 
+def resolve_model(runtime: AgentRuntime, requested: str = "") -> str:
+    """The id a run will actually pin, or an error naming what to pass.
+
+    A harness may decline to name a default — one that fronts many providers
+    cannot pick one that is right for someone else's account. That is not the
+    same as running unpinned: an empty id reaches the ledger as an empty
+    string, and a run whose model nobody recorded cannot be read against any
+    other. So the choice is deferred to the caller, and refused if the caller
+    does not make it. Raised before a run directory or an anchor is built, so
+    the correction costs nothing.
+    """
+    model = (requested or runtime.default_model or "").strip()
+    if not model:
+        raise ValueError(
+            f"runtime {runtime.name!r} states no default model, so a run has to name "
+            f"one: pinnforge run start --model <id>, or --set agent.model=<id>"
+        )
+    return model
+
+
 def known_runtimes() -> list[str]:
     return sorted(_RUNTIMES)
 

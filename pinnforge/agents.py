@@ -50,7 +50,7 @@ def _drive(
         block_id=label,
         cwd=cwd,
         prompt=prompt,
-        model=agent.model or runtime.default_model,
+        model=runtime_registry.resolve_model(runtime, agent.model),
         log_path=log_path,
         env=clean_env(env or {}),
         command=agent.command or None,
