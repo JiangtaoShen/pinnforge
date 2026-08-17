@@ -202,11 +202,22 @@ def cmd_audit(args) -> int:
 
 def cmd_stop(args) -> int:
     """Mark a run stopped. Live processes are in their own group; if one is
-    still attached, interrupt the CLI that owns it rather than this state."""
+    still attached, interrupt the CLI that owns it rather than this state.
+
+    A stopped run has no running blocks in it, so any left marked that way are
+    reconciled too. Otherwise `run status` keeps reporting a block as running
+    long after its process is gone, which is the one thing that display exists
+    to tell you.
+    """
     run, _, state = layout.load_run(args.run_id)
     state.status = "stopped"
+    stale = [b for b in state.blocks.values() if b.status == "running"]
+    for bs in stale:
+        bs.status = "interrupted"
+        bs.exit_reason = bs.exit_reason or "run stopped while this block was dispatched"
     state.save(paths.state_path(run))
-    print(f"{args.run_id}: marked stopped")
+    note = f" ({', '.join(b.block_id for b in stale)} marked interrupted)" if stale else ""
+    print(f"{args.run_id}: marked stopped{note}")
     return 0
 
 

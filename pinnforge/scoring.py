@@ -20,9 +20,11 @@ Wire protocol, all under `<run>/.scoreq/` (created on demand):
     res/<id>.json   score record, written atomically (tmp + rename)
     scored.alive    daemon heartbeat (mtime)
 
-The client removes its own request files once answered; the daemon skips
-requests that already have a response, so a re-scan is idempotent and no
-locking is needed.
+The client removes the whole exchange once it has read the answer — request,
+payload and response — so a finished run leaves an empty queue behind. The
+daemon skips requests that already have a response, so a re-scan before the
+client gets there is idempotent and no locking is needed; `_collect` sweeps
+whatever a client died holding.
 
 Reference resolution: `<private>/<task>/<reference>` when a private
 directory is configured (`FORGE_PRIVATE_DIR`, or `pinnforge scored
@@ -111,7 +113,13 @@ def submit_score(run: Path, meta: dict[str, Any], pred_path: Path, wait_s: float
             "(`pinnforge run start` serves it in-process)",
         }
     finally:
-        for f in (payload, request):
+        # The answer goes too, not just the request. The daemon's idempotency
+        # rests on a response outliving its request, not on it outliving the
+        # client that consumed it — and `_collect` only sweeps what is already
+        # an hour old, while the daemon stops with the run. Leaving them behind
+        # littered every run directory with the results of its last hour: 37
+        # orphaned files in the longest one here.
+        for f in (payload, request, answer):
             with suppress(OSError):
                 f.unlink()
 
