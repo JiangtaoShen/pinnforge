@@ -223,11 +223,17 @@ class Orchestrator:
         """
         stall_s = self.cfg.stall_minutes * 60
         warned = False
+        # Silence is measured from this dispatch, not from whatever the
+        # workspace last had written to it. A re-adopted block carries the
+        # mtimes of the segment that stopped hours ago, so measuring from
+        # those made every resume cry wolf on its first poll: ldc_4's b02 was
+        # reported "quiet for 82 min" sixty seconds after it was dispatched.
+        segment_started = time.time()
         try:
             while handle.alive:
                 if handle.wait(timeout=self.cfg.poll_seconds) is not None:
                     break
-                quiet = time.time() - self._newest_mtime(block_id)
+                quiet = time.time() - max(self._newest_mtime(block_id), segment_started)
                 if quiet > stall_s and not warned:
                     logger.warning(
                         "block %s quiet for %.0f min (still running)", block_id, quiet / 60
