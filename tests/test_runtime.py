@@ -382,3 +382,33 @@ def test_ctrl_c_during_a_block_does_not_leave_the_agent_running(tmp_path, monkey
     assert not handle.alive, "the block must not survive the interrupt"
     with pytest.raises(ProcessLookupError):
         os.killpg(pgid, 0)
+
+
+def test_opencode_session_id_comes_out_of_logfmt(tmp_path):
+    """opencode logs logfmt, not JSON, so the JSON scan found nothing.
+
+    `opencode run --format json` exists but hangs in 1.18.x, so the log a block
+    leaves is the default output plus the `--print-logs` stream on stderr,
+    which spawn() merges into the same file. Scanning it for JSON returned
+    None, and a None session id means the orchestrator cannot continue a block
+    in its own session — every continuation silently became a fresh agent
+    adopting the workspace.
+    """
+    log = tmp_path / "b01.0.log"
+    log.write_text(
+        "timestamp=2026-08-17T15:01:02.936Z level=INFO run=5f96bfed message=init\n"
+        "timestamp=2026-08-17T15:01:03.030Z level=INFO run=5f96bfed message=created "
+        "id=ses_fefb50849ffevXiu0ycSPfxrpV slug=glowing-wizard version=1.18.18\n"
+        "timestamp=2026-08-17T15:01:03.359Z level=INFO run=5f96bfed message=stream "
+        "providerID=deepseek modelID=deepseek-chat session.id=ses_fefb50849ffevXiu0ycSPfxrpV\n"
+        "ok\n",
+        encoding="utf-8",
+    )
+    rt = registry.get_runtime("opencode")
+    assert rt.extract_session_id(log) == "ses_fefb50849ffevXiu0ycSPfxrpV"
+
+
+def test_opencode_session_id_absent_is_still_none(tmp_path):
+    log = tmp_path / "empty.log"
+    log.write_text("timestamp=2026-08-17T15:01:02Z level=INFO message=init\n", encoding="utf-8")
+    assert registry.get_runtime("opencode").extract_session_id(log) is None

@@ -327,6 +327,7 @@ class Orchestrator:
         )
         prompt = charter.block_prompt(block_id, self.run, crashed=crashed)
         resume_session: str | None = None
+        last_progress: tuple[int, int] | None = None
 
         for segment in range(MAX_SEGMENTS):
             if not gpu_healthy(self.cfg.sandbox.gpus):
@@ -379,10 +380,21 @@ class Orchestrator:
                 self._relay(block_id, verdict)
                 return True
 
-            # Not done. Continue the same session when the harness gave us a
-            # token to resume with; otherwise a fresh agent picks up the
-            # workspace, which is why the charter makes the workspace — not
-            # the conversation — the block's memory.
+            # A segment that bought nothing means the agent considers itself
+            # finished, and the same prompt to the same session will get the
+            # same answer. Resuming again is not persistence, it is a spin:
+            # ldc_4's b02 stopped 104 s short of the threshold with its summary
+            # written and 23 scored evaluations, and the loop re-dispatched it
+            # four times in 42 seconds before giving up and calling it failed.
+            progress = (round(verdict.spent), verdict.scored_evals)
+            if progress == last_progress:
+                return self._settle_stalled(block_id, verdict, segment)
+            last_progress = progress
+
+            # Continue the same session when the harness gave us a token to
+            # resume with; otherwise a fresh agent picks up the workspace,
+            # which is why the charter makes the workspace — not the
+            # conversation — the block's memory.
             resume_session = bs.session_id
             if verdict.only_summary_missing:
                 prompt = charter.summary_repair_prompt(block_id)
@@ -405,6 +417,42 @@ class Orchestrator:
         bs.completed_at = utcnow()
         self._save()
         logger.error("block %s abandoned after %d segments", block_id, MAX_SEGMENTS)
+        return False
+
+    def _settle_stalled(self, block_id: str, verdict: BlockVerdict, segment: int) -> bool:
+        """A block whose agent will not go further. Say which kind it is.
+
+        `failed` has to mean "produced nothing usable", or the summary lies
+        about the run: ldc_4's b02 was recorded as failed while holding the
+        best score in the run, a written summary and 23 scored evaluations,
+        purely because it stopped 104 s short of the budget threshold.
+
+        The budget still decides `done`, because comparability rests on blocks
+        having had the same GPU time. What changes is that a block which spent
+        almost all of it and wrote up what it found is `short` — usable
+        evidence that fell shy of the bar — and not a failure.
+        """
+        bs = self.state.blocks[block_id]
+        usable = verdict.has_summary and verdict.scored_evals >= 1
+        bs.status = "short" if usable else "failed"
+        bs.completed_at = utcnow()
+        shortfall = max(0.0, verdict.budget - verdict.spent)
+        bs.exit_reason = bs.exit_reason or (
+            f"agent stopped {shortfall:.0f} s short of the budget and made no "
+            f"progress when resumed (segment {segment + 1})"
+        )
+        self._save()
+        logger.warning(
+            "block %s made no progress on resume — stopping at %.0f/%.0f s, %d eval(s), "
+            "summary %s",
+            block_id,
+            verdict.spent,
+            verdict.budget,
+            verdict.scored_evals,
+            "present" if verdict.has_summary else "missing",
+        )
+        if usable:
+            self._relay(block_id, verdict)
         return False
 
     def _relay(self, block_id: str, verdict: BlockVerdict) -> None:

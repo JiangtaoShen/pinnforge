@@ -71,9 +71,27 @@ with the same prompt, working directory and environment.
 | `opencode` | `opencode` | none; pass `--model` |
 
 ```bash
+pinnforge agents doctor --ping --model claude-opus-4-8   # does the binding answer?
 pinnforge run start -t ks --runtime codex --model gpt-5.4
 pinnforge run start -t ldc --model claude-opus-5
 ```
+
+`doctor` alone checks the CLI is installed. `--ping` spends one exchange
+proving the credentials, the provider config and the model id work too. Each
+of those otherwise fails at the first block, an hour in, with a run directory
+and a measured anchor already paid for.
+
+A provider the CLI does not ship is the CLI's business, not the framework's.
+For OpenCode and DeepSeek, `~/.config/opencode/opencode.json` is enough:
+
+```json
+{ "provider": { "deepseek": { "options": {
+    "baseURL": "https://api.deepseek.com",
+    "apiKey": "{env:DEEPSEEK_API_KEY}" } } } }
+```
+
+then `--runtime opencode --model deepseek/deepseek-chat`. Keep the key in the
+environment, not in the file.
 
 **Pin an exact id, not an alias.** `opus` meant `claude-opus-4-8` for a year and
 `claude-opus-5` after, so two runs a generation apart both record "opus" and
