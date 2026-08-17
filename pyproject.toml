@@ -1,0 +1,65 @@
+[project]
+name = "pinnforge"
+version = "0.1.0"
+description = "PINNForge — knowledge-centric multi-agent system for autonomous PINN design"
+requires-python = ">=3.11"
+dependencies = [
+    # ── Orchestrator (harness-agnostic; no LLM SDK — agents are external CLIs) ──
+    "pyyaml>=6.0",
+    # ── Core PINN stack (frozen; every task's problem.md documents these pins) ──
+    "jax[cuda12]==0.4.33",
+    "flax==0.9.0",
+    "optax==0.2.3",
+    "numpy==2.1.1",
+    "scipy==1.17.1",
+    # ── JAX-ecosystem extras (blocks may `uv add` more; core pins above stay frozen) ──
+    "jaxopt==0.8.5",
+    "evosax==0.1.6",
+    "ml_collections==1.1.0",
+    "jaxtyping==0.3.11",
+    "chex>=0.1.86",
+    "soap-jax @ git+https://github.com/haydn-jones/SOAP_JAX@ddddc25724dfd629b0cd01584eca1e32ea8ac4de",
+]
+
+[project.optional-dependencies]
+# ruff is bounded, not floored: its default rule set widens between minor
+# releases, and an unbounded floor is how `ruff check .` went from clean to 71
+# findings without a line of this repo changing.
+dev = ["pytest>=8.0", "ruff>=0.16,<0.17"]
+
+[project.scripts]
+pinnforge = "pinnforge.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pinnforge"]
+
+# soap-jax is pinned to a git commit, like the framework it came from.
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# `tasks/` is data, not framework code. Its `baseline.py` and `eval.py` are
+# md5-fingerprinted by the anchor cache (pinnforge/task/registry.py), so a
+# whitespace-only lint fix marks every cached b00 STALE and costs a GPU
+# re-measurement of a number that is not reproducible to better than 0.4-17%.
+# They are held to the task contract instead: `pinnforge task validate`.
+extend-exclude = ["tasks"]
+
+[tool.ruff.lint]
+# Selected explicitly, never inherited. Ruff's default set widened between
+# releases and silently turned a passing gate into 71 findings under the same
+# `ruff>=0.6` floor — a lint contract that moves on its own is not a contract.
+select = ["E", "W", "F", "I", "B", "C4", "UP", "SIM", "RET", "RUF"]
+# The prose in this repo — docstrings, charter, corpus — uses real typography:
+# em dashes, en dashes in ranges, × in "3×". Flagging those as ambiguous would
+# make the linter an argument with the house style rather than a check on it.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

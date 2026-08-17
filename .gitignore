@@ -1,0 +1,34 @@
+# Runs are local experiment data, never committed.
+runs/
+logs/
+
+# The scoring truth never enters the repository. It is the one thing the score
+# service exists to withhold, and a file committed here is a file every clone
+# has. Keep it local and point the daemon at it:
+#
+#     pinnforge scored <run_id> --private /srv/pinnforge-private
+#     FORGE_PRIVATE_DIR=/srv/pinnforge-private
+#
+# A fresh clone therefore validates and smokes only once private/ is supplied.
+tasks/*/private/
+
+# The cached b00 anchor is a measurement of this machine's GPU, not a property
+# of the task. `pinnforge task anchor <task> --measure` rebuilds it.
+tasks/*/.anchor/
+
+# Public task data — eval_grid.csv, collocation.csv, the initial conditions —
+# IS committed: `registry.install` copies it into every run and the physics
+# does not run without it.
+
+# A kb1/ at the project root overrides the corpus that ships in the package
+# (pinnforge/kb1/, which is committed). An override is a local deployment
+# choice, so it stays local.
+/kb1/*.md
+!/kb1/INDEX.md
+
+.venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
