@@ -412,3 +412,19 @@ def test_opencode_session_id_absent_is_still_none(tmp_path):
     log = tmp_path / "empty.log"
     log.write_text("timestamp=2026-08-17T15:01:02Z level=INFO message=init\n", encoding="utf-8")
     assert registry.get_runtime("opencode").extract_session_id(log) is None
+
+
+def test_claude_code_admits_no_ambient_mcp(monkeypatch):
+    """A block's tool surface is part of what a block is.
+
+    Between two runs of the same task the surface went from 31 tools to 89
+    because MCP connectors had been added to the operator's account in the
+    meantime, and nothing in the framework recorded that it had changed. With
+    no --mcp-config to pair it with, --strict-mcp-config admits none of them.
+    """
+    seen = _argv(monkeypatch, registry.get_runtime("claude_code"), model="M")
+    assert "--strict-mcp-config" in seen["cmd"]
+    assert "--mcp-config" not in seen["cmd"], "pairing it with a config would re-admit servers"
+    # the flags a block actually needs are untouched
+    for flag in ("-p", "--model", "--dangerously-skip-permissions", "--output-format"):
+        assert flag in seen["cmd"], flag

@@ -53,6 +53,13 @@ class ClaudeCodeRuntime:
             # A block edits files and runs GPU evals unattended; there is no
             # user to approve tools. Confinement is the sandbox's job.
             "--dangerously-skip-permissions",
+            # A block's tool surface is part of what a block *is*, so it must
+            # not vary with whatever the operator happens to have connected.
+            # Ambient MCP servers took one measured here from 31 tools to 89
+            # between two runs of the same task, with nothing in the framework
+            # recording that it had changed. With no --mcp-config to pair it
+            # with, this admits none of them and the surface is the CLI's own.
+            "--strict-mcp-config",
             "--output-format",
             "stream-json",
             "--verbose",

@@ -1,0 +1,62 @@
+---
+description: PINNForge CLI workflow — authoring tasks and running blocks from Cursor
+globs:
+alwaysApply: false
+---
+
+# PINNForge
+
+PINNForge designs physics-informed neural networks by running autonomous coding
+agents as **blocks**: one agent, a fixed GPU-wall budget, one written summary,
+in series, with knowledge compounding through the summaries. The orchestrator is
+a plain Python process; whether a block is finished is a question the filesystem
+answers.
+
+Do not memorise flags. Run `pinnforge --help` or `pinnforge <cmd> --help`.
+
+## Running blocks
+
+```bash
+pinnforge run start -t ldc -n 5        # launch
+pinnforge run status ldc_5             # per-block wall, evals, summary, best
+pinnforge run log ldc_5 -n 20          # scored evaluations, best first
+pinnforge run show ldc_5 b03           # one block's records and summary
+pinnforge run resume ldc_5             # after an interruption
+pinnforge run audit ldc_5              # did any block alter another's record
+pinnforge run stop ldc_5
+```
+
+Block status means: `done` (summary + budget spent + a scored eval), `short`
+(usable work, stopped before the budget was spent), `interrupted`, `failed`
+(nothing usable).
+
+## Authoring a task
+
+```bash
+pinnforge task list
+pinnforge task validate <name>         # 29 contract checks
+pinnforge task smoke <name>            # free CPU dress rehearsal
+pinnforge task anchor <name>           # the b00 score every block must beat
+pinnforge task new <name> --source <dir> --prompt "..."
+```
+
+## Harnesses
+
+```bash
+pinnforge agents list
+pinnforge agents doctor --ping --model <id>
+```
+
+`--ping` spends one exchange proving credentials, provider config and model id
+work. Pin an exact model id, never an alias.
+
+## Two rules
+
+**Never write into a live `runs/<id>/`.** It is a block's workspace and is
+hashed before every dispatch; an edit becomes an integrity violation.
+
+**Never place this file, `AGENTS.md`, or `.cursor/rules/` at the root of a
+PINNForge checkout.** Blocks run with `runs/<id>/` as their working directory
+and CLIs walk up the tree for such files, so a copy at the project root is read
+by every block and changes what a block is. Keep it in the project you drive
+PINNForge *from*.

@@ -1,0 +1,16 @@
+{
+  "name": "pinnforge",
+  "displayName": "PINNForge",
+  "description": "Author and run PINNForge tasks from Codex. Teaches the pinnforge CLI workflow (task new/validate/smoke/anchor, run start/status/resume/log/show/audit) and checks pinnforge is installed on session start.",
+  "version": "0.1.0",
+  "author": {
+    "name": "JiangtaoShen",
+    "url": "https://github.com/JiangtaoShen/pinnforge"
+  },
+  "homepage": "https://github.com/JiangtaoShen/pinnforge",
+  "repository": "https://github.com/JiangtaoShen/pinnforge",
+  "license": "MIT",
+  "keywords": ["pinnforge", "pinn", "physics-informed", "agents", "orchestration"],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks-codex.json"
+}

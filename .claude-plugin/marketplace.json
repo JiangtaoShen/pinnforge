@@ -1,0 +1,16 @@
+{
+  "name": "pinnforge-marketplace",
+  "owner": { "name": "JiangtaoShen", "url": "https://github.com/JiangtaoShen/pinnforge" },
+  "metadata": {
+    "description": "PINNForge — knowledge-centric multi-agent system for autonomous PINN design. A skills-first plugin for authoring and running PINNForge tasks from your own harness.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "pinnforge",
+      "source": "./plugin",
+      "description": "Author and run PINNForge tasks (task new/validate/smoke/anchor, run start/status/resume/log/show/audit) from Claude Code or Codex. Skills + a SessionStart install check.",
+      "keywords": ["pinnforge", "pinn", "agents", "orchestration"]
+    }
+  ]
+}
