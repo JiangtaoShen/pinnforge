@@ -26,7 +26,7 @@ from pathlib import Path
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 CATALOG = EXAMPLES_DIR / "catalog.json"
 DEMO = "demo"
-DEMO_FILES = ("problem.md", "baseline.py", "eval.py")
+DEMO_FILES = ("problem.md", "baseline.py", "eval.py", "view.json")
 GRID_N = 101  # the demo scores on a uniform 101 × 101 grid, edges included
 
 

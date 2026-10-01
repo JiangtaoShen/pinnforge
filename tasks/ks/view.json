@@ -1,0 +1,13 @@
+{
+  "axes": {
+    "x": "x",
+    "y": "t"
+  },
+  "panels": [
+    {
+      "title": "u(x, t)",
+      "show": "u",
+      "colors": "diverging"
+    }
+  ]
+}

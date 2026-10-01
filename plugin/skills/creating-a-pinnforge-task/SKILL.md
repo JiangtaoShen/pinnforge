@@ -70,6 +70,11 @@ be plain identifiers. `task new` honours `private_dir` / `FORGE_PRIVATE_DIR`.
   `predict_rows`) and its metric `score_predictions(fields, ref_dir)`. The
   machinery (budget, GPU locks, workers, score queue) is shared and vendored
   into each run as `task/_forgekit.py`.
+- **`view.json`** — how the dashboard's fixed field window shows this task's
+  predictions: grid coordinates on the screen axes, a time slider or a slice,
+  and 1-4 panels (an output head, `{"magnitude": [...]}` or `{"abs": ...}`,
+  each sequential or diverging). The author writes it; `task validate` checks
+  it; it does not affect the anchor.
 - **public data** (the grid, geometry, initial conditions) in the task
   directory; **the answers** in `private/`, which never enters a run.
 

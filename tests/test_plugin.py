@@ -19,7 +19,7 @@ REPO = Path(__file__).resolve().parents[1]
 PLUGIN = REPO / "plugin"
 DOCS = [*PLUGIN.glob("skills/*/SKILL.md"), *PLUGIN.glob("agents/*.md"), PLUGIN / "AGENTS.md",
         PLUGIN / "opencode" / "pinnforge.md", PLUGIN / "cursor" / "pinnforge.mdc",
-        REPO / "README.md", REPO / "README_CN.md"]
+        REPO / "README.md"]
 
 
 def _frontmatter(path: Path) -> dict:

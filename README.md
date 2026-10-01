@@ -1,7 +1,5 @@
 # PINNForge
 
-**English** | [中文](README_CN.md)
-
 PINNForge designs physics-informed neural networks with autonomous coding
 agents. A **block** is one agent, a fixed GPU-wall budget, and one written
 summary. Blocks run in series; knowledge compounds through the summaries, not
@@ -202,6 +200,14 @@ The framework touches a task only through this interface.
   `task/`. `eval.py blocks/bNN/<file>.py [--gpu G] [--seed S] [--smoke | --diag]`
   appends one record per run to `blocks/bNN/evals.jsonl` and exits 0 whenever
   a record was written.
+* **`view.json`** — what the dashboard's fixed field window draws for this
+  task: which grid coordinates go on the screen axes (`(x, t)` as a
+  space-time map), which on a time slider or a slice, and one to four panels
+  of output heads or quantities derived from them (`{"magnitude": ["u", "v"]}`).
+  The task author writes it, `task validate` checks it against the task's
+  coordinates and heads, and it is not part of the anchor's key. It is
+  declarative and shows predictions only; without one the dashboard picks a
+  default.
 * **Public data** sits in the task directory; **the answers** in `private/`.
 
 `pinnforge task validate <name>` runs the contract checks. The b00 anchor is

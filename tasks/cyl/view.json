@@ -1,0 +1,24 @@
+{
+  "axes": {
+    "x": "x",
+    "y": "y"
+  },
+  "time": "t",
+  "panels": [
+    {
+      "title": "speed |V|",
+      "show": {
+        "magnitude": [
+          "u",
+          "v"
+        ]
+      },
+      "colors": "sequential"
+    },
+    {
+      "title": "v (cross-stream)",
+      "show": "v",
+      "colors": "diverging"
+    }
+  ]
+}

@@ -25,6 +25,7 @@ In `{dest}`:
 | `baseline.py` | the root candidate: vanilla PINN, frozen header, `train` / `predict_fn` |
 | `eval.py` | the task's constants, grid handling and metric; the machinery is shared |
 | `eval_grid.csv` | **public** — the coordinates a candidate predicts at |
+| `view.json` | how the dashboard draws this task's predictions |
 | any other data | **public** — geometry, level sets, initial conditions: whatever `baseline.py` reads |
 
 You never write or read the answers. They live in `private/`, which a
@@ -137,6 +138,41 @@ Any mask must be computable **from the public grid alone** and applied
 identically on both sides. If the metric is a derived quantity — a velocity
 magnitude, an energy — derive it in `score_predictions` and have candidates
 predict only the raw fields.
+
+## `view.json` — how the predictions are shown
+
+The live dashboard gives every run one fixed window for its predicted fields.
+What goes in that window is yours to decide, because only you know which
+picture of this problem is worth watching: a 1-D steady profile is a line, an
+`(x, t)` problem is best seen as a space-time map, a `(t, x, y)` flow as a map
+with a time slider, a 3-D field as a slice; a velocity pair usually reads best
+as a speed, several output heads side by side. Write it from the template's
+and validate it:
+
+    {
+      "axes":   {"x": "x", "y": "y"},
+      "time":   "t",
+      "panels": [
+        {"title": "speed |V|", "show": {"magnitude": ["u", "v"]}, "colors": "sequential"},
+        {"title": "v", "show": "v", "colors": "diverging"}
+      ]
+    }
+
+* `axes` — the grid coordinates (the first `INPUT_COLUMNS` header names of
+  `eval_grid.csv`) on the screen's x and y. Leave out `"y"` for a 1-D problem:
+  each panel is then drawn as a line. For an `(x, t)` problem put `t` on `y`.
+* `time` — a coordinate shown on a slider instead of an axis (a `(t, x, y)`
+  problem); `slice` — `{"axis": "z", "at": 0.5}`, a coordinate held at one
+  value, for a 3-D problem. Every grid coordinate goes on exactly one of
+  `axes.x`, `axes.y`, `time`, `slice`.
+* `panels` — one to four, laid out to fill the window. `show` is an output
+  head from `FIELDS`, `{"magnitude": [heads]}` or `{"abs": head}` — computed
+  from the predictions only. `colors`: `"diverging"` for a field that
+  changes sign around zero (a velocity component, a vorticity), `"sequential"`
+  for one that does not (a speed, a temperature), `"auto"` to let it decide.
+  `title` is a short label (at most 40 characters).
+
+Like the rest of the package it says nothing about the solution.
 
 ## Verify before you finish
 

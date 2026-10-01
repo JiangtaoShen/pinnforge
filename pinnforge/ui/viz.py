@@ -178,8 +178,13 @@ def _seed(value):
 class Archiver:
     """Called by the score daemon after each successful score."""
 
-    def __init__(self, run: Path, coords, input_columns: int, names: list[str]):
-        """`coords`: the rows predictions are filed at (grid[predict_rows])."""
+    def __init__(self, run: Path, coords, input_columns: int, names: list[str],
+                 step: int | None = None):
+        """`coords`: the rows predictions are filed at (grid[predict_rows]).
+
+        `step`: the coordinate column the view puts on a slider (time, or the
+        sliced axis), if any — the sample then keeps whole slices of it.
+        """
         import numpy as np
 
         self.run = Path(run)
@@ -187,9 +192,8 @@ class Archiver:
         self.lock = threading.Lock()
         self.disabled = False
         n = coords.shape[0]
-        stride = max(1, -(-n // MAX_POINTS))
-        self.idx = np.arange(0, n, stride)
         self.dims = min(int(input_columns), 3)
+        self.idx = sample_rows(coords, self.dims, step)
         self.names = list(names)
         self.best_run: float | None = None
         self.best_block: dict[str, float] = {}
@@ -337,6 +341,82 @@ class Archiver:
                 self.best_block[block] = score
 
 
+MAX_STEPS = 12
+
+
+def _thin(points, budget: int):
+    """Indices of at most about `budget` of `points` (m × d), spread evenly.
+
+    Points on a lattice — every combination of a few coordinate values, with
+    holes allowed where a body sits — keep every k-th line in each direction,
+    so they are still a lattice the page can draw as an image. Anything else
+    keeps every k-th point.
+    """
+    import numpy as np
+
+    m, d = points.shape
+    if m <= budget:
+        return np.arange(m)
+    lines = [np.unique(points[:, j]) for j in range(d)]
+    if float(np.prod([len(u) for u in lines], dtype=float)) <= 2 * m:
+        # thin the direction with the most lines left, one step at a time
+        k = [1] * d
+        while m / float(np.prod(k)) > budget:
+            j = max(range(d), key=lambda j: len(lines[j]) / k[j])
+            k[j] += 1
+        keep = np.ones(m, dtype=bool)
+        for j, u in enumerate(lines):
+            keep &= (np.searchsorted(u, points[:, j]) % k[j]) == 0
+        return np.flatnonzero(keep)
+    return np.arange(0, m, max(1, -(-m // budget)))
+
+
+def sample_rows(coords, dims: int, step: int | None, limit: int = MAX_POINTS):
+    """Which rows of the scored grid to keep, at most about `limit` of them.
+
+    With a slider coordinate, up to MAX_STEPS of its values, evenly spaced,
+    each kept as a slice thinned the same way, so every slice is the same set
+    of points; a global stride over a (t, x, y) grid hit a different scatter
+    in each slice and drew stripes.
+    """
+    import numpy as np
+
+    pts = np.asarray(coords[:, :dims], dtype=np.float64)
+    if step is None or not 0 <= step < dims:
+        return _thin(pts, limit)
+    space = [j for j in range(dims) if j != step]
+    values = pts[:, step]
+    steps = np.unique(values)
+    count = min(len(steps), MAX_STEPS)
+    picks = np.unique(np.linspace(0, len(steps) - 1, count).round().astype(int))
+    per = max(1, limit // len(picks))
+    kept = []
+    for s in steps[picks]:
+        rows = np.flatnonzero(values == s)
+        kept.append(rows[_thin(pts[rows][:, space], per)] if space else rows)
+    return np.sort(np.concatenate(kept))
+
+
+def step_column(task_dir: Path, header: list[str], names: list[str]) -> int | None:
+    """The coordinate a run's view puts on a slider, as a column index, or None.
+
+    The task's view.json when it is valid; otherwise the dashboard's default
+    for three coordinates — a time coordinate on the slider, else the last
+    one sliced.
+    """
+    from pinnforge.task import view
+
+    coords = header[:3]
+    shown, _ = view.check(view.load(Path(task_dir) / view.VIEW_FILE), coords, names)
+    if shown:
+        name = shown.get("time") or (shown.get("slice") or {}).get("axis")
+        return coords.index(name) if name in coords else None
+    if len(coords) < 3:
+        return None
+    timed = [i for i, c in enumerate(coords) if c.lower() in ("t", "time")]
+    return timed[0] if timed else len(coords) - 1
+
+
 def archiver_for(run: Path, metric) -> Archiver | None:
     """An archiver for `run`, from the score daemon's snapshot of its task."""
     import numpy as np
@@ -355,7 +435,9 @@ def archiver_for(run: Path, metric) -> Archiver | None:
         names = list(getattr(mod, "FIELDS", ()) or ())
         with open(mod.GRID_CSV, encoding="utf-8") as fh:
             header = [h.strip() for h in fh.readline().split(",")]
-        arch = Archiver(run, grid[rows], cols, names)
+        # the snapshot's own directory holds its view.json, beside its grid
+        step = step_column(Path(mod.GRID_CSV).parent, header[: min(cols, 3)], names)
+        arch = Archiver(run, grid[rows], cols, names, step=step)
         arch.write_json("grid.json", {
             "coords": header[: arch.dims],
             "fields": names,

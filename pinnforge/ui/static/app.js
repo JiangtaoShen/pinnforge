@@ -5,86 +5,48 @@
  */
 "use strict";
 (() => {
-  // ───────────────────────────── i18n ─────────────────────────────
-  const I18N = {
-    en: {
-      runs: "Runs", tasks: "Tasks", compute: "Compute", noRuns: "No runs yet.",
-      startHint: "Start one:", noTasks: "No tasks yet.", live: "live", idle: "idle",
-      connecting: "connecting…", connected: "live", best: "Best rRMSE", anchor: "Anchor (b00)",
-      vsAnchor: "{0}× better than the anchor", evals: "Evaluations", errors: "{0} failed",
-      gpuTime: "GPU time", cpuTime: "CPU time", cost: "Model cost", tokens: "{0} tokens", progress: "Progress",
-      progressSub: "Every scored evaluation, by cumulative {0}; the line is the best so far.",
-      legendEval: "evaluation", legendCur: "current block", legendBest: "best so far",
-      legendAnchor: "anchor", legendErr: "failed evaluation", field: "Predicted field",
-      fieldSub: "The best predictions so far, as the blocks found them.",
-      noFrames: "The field appears here once an evaluation is scored.",
-      play: "Play", pause: "Pause", latest: "Latest", timeSlice: "t =", agent: "Agent activity",
-      noActivity: "No agent activity yet.", blocks: "Blocks", summary: "Summary",
-      noSummary: "This block has not written its summary yet.", evalTable: "Evaluations",
-      block: "Block", candidate: "Candidate", score: "rRMSE", wall: "Wall s", when: "When",
-      status: "Status", spentOf: "{0} / {1} s", nEvals: "{0} evals", gpus: "GPUs", util: "util",
-      mem: "mem", usedBy: "in use by {0}", free: "free", notInPool: "not used by this workspace", noGpu: "No GPU visible — CPU mode.",
-      model: "Model", task: "Task", title: "Title", state: "State", ready: "ready",
-      authoring: "authoring: {0}", failedAt: "failed at {0}", stages: "Authoring",
-      reference: "Reference", refBuilt: "built by an agent", refOperator: "from the operator",
-      estimate: "Estimated error", order: "Observed order",
-      reproduced: "Reproduced", yes: "yes", no: "no", tolerance: "tolerance",
-      levelDiff: "level vs next level", finestEst: "estimate for the finest",
-      authorAgent: "Author agent", problem: "problem.md", runIt: "Run it:",
-      notFound: "Not found.", workspace: "Workspace", back: "Overview", tFieldAt: "at",
-      stage_intake: "Intake", stage_author: "Author the package", stage_reference: "Reference",
-      stage_reference_check: "Check the reference", stage_validate: "Validate",
-      stage_smoke: "Smoke test", stage_anchor: "Measure the anchor", stage_finalize: "Ready",
-      st_done: "done", st_running: "running", st_failed: "failed", st_short: "short",
-      st_interrupted: "interrupted", st_stopped: "stopped", st_finished: "finished",
-      st_created: "created", st_pending: "pending", st_skipped: "skipped", st_ready: "ready",
-      st_measuring: "measuring", st_missing: "missing", st_unreadable: "unreadable",
-      st_clean: "clean", st_violated: "violated", st_unchecked: "unchecked",
-      integrity: "integrity", blocksOf: "{0}/{1} blocks", table: "Table", snapshot: "snapshot",
-    },
-    zh: {
-      runs: "运行", tasks: "任务", compute: "算力", noRuns: "还没有运行。",
-      startHint: "开始一个：", noTasks: "还没有任务。", live: "运行中", idle: "空闲",
-      connecting: "连接中…", connected: "实时", best: "最佳 rRMSE", anchor: "基线 (b00)",
-      vsAnchor: "比基线好 {0} 倍", evals: "评估次数", errors: "{0} 次失败",
-      gpuTime: "GPU 时间", cpuTime: "CPU 时间", cost: "模型费用", tokens: "{0} tokens", progress: "进展",
-      progressSub: "每次已评分的评估，按累计 {0}排列；折线是迄今最佳。",
-      legendEval: "评估", legendCur: "当前 block", legendBest: "迄今最佳",
-      legendAnchor: "基线", legendErr: "失败的评估", field: "预测场",
-      fieldSub: "各 block 找到的迄今最佳预测，按时间回放。",
-      noFrames: "有评估完成评分后，这里会显示预测场。",
-      play: "播放", pause: "暂停", latest: "最新", timeSlice: "t =", agent: "智能体动态",
-      noActivity: "还没有智能体动态。", blocks: "Blocks", summary: "总结",
-      noSummary: "这个 block 还没有写总结。", evalTable: "评估记录",
-      block: "Block", candidate: "候选", score: "rRMSE", wall: "耗时 s", when: "时间",
-      status: "状态", spentOf: "{0} / {1} 秒", nEvals: "{0} 次评估", gpus: "GPU", util: "利用率",
-      mem: "显存", usedBy: "被 {0} 使用", free: "空闲", notInPool: "本工作区不使用", noGpu: "没有可见的 GPU —— CPU 模式。",
-      model: "模型", task: "任务", title: "标题", state: "状态", ready: "就绪",
-      authoring: "创建中：{0}", failedAt: "失败于 {0}", stages: "任务创建",
-      reference: "参考解", refBuilt: "由智能体构建", refOperator: "由用户提供",
-      estimate: "估计误差", order: "观测收敛阶",
-      reproduced: "可复现", yes: "是", no: "否", tolerance: "容差",
-      levelDiff: "相邻两层之差", finestEst: "最细层的误差估计",
-      authorAgent: "任务编写智能体", problem: "problem.md", runIt: "运行它：",
-      notFound: "未找到。", workspace: "工作区", back: "总览", tFieldAt: "于",
-      stage_intake: "收集需求", stage_author: "编写任务包", stage_reference: "参考解",
-      stage_reference_check: "检查参考解", stage_validate: "契约校验",
-      stage_smoke: "冒烟测试", stage_anchor: "测量基线", stage_finalize: "就绪",
-      st_done: "完成", st_running: "进行中", st_failed: "失败", st_short: "未用满",
-      st_interrupted: "已中断", st_stopped: "已停止", st_finished: "已结束",
-      st_created: "已创建", st_pending: "等待", st_skipped: "跳过", st_ready: "就绪",
-      st_measuring: "测量中", st_missing: "缺失", st_unreadable: "无法读取",
-      st_clean: "完整", st_violated: "被改动", st_unchecked: "未检查",
-      integrity: "完整性", blocksOf: "{0}/{1} 个 block", table: "表格", snapshot: "快照",
-    },
+  // ───────────────────────────── text ─────────────────────────────
+  const TEXT = {
+    runs: "Runs", tasks: "Tasks", compute: "Compute", noRuns: "No runs yet.",
+    startHint: "Start one:", noTasks: "No tasks yet.", live: "live", idle: "idle",
+    connecting: "connecting…", connected: "live", best: "Best rRMSE", anchor: "Anchor (b00)",
+    vsAnchor: "{0}× better than the anchor", evals: "Evaluations", errors: "{0} failed",
+    gpuTime: "GPU time", cpuTime: "CPU time", cost: "Model cost", tokens: "{0} tokens", progress: "Progress",
+    progressSub: "Every scored evaluation, by cumulative {0}; the line is the best so far.",
+    legendEval: "evaluation", legendCur: "current block", legendBest: "best so far",
+    legendAnchor: "anchor", legendErr: "failed evaluation", field: "Predicted field",
+    fieldSub: "The best predictions so far, as the blocks found them.",
+    noFrames: "The field appears here once an evaluation is scored.",
+    play: "Play", pause: "Pause", latest: "Latest", timeSlice: "t =", agent: "Agent activity",
+    noActivity: "No agent activity yet.", blocks: "Blocks", summary: "Summary",
+    noSummary: "This block has not written its summary yet.", evalTable: "Evaluations",
+    block: "Block", candidate: "Candidate", score: "rRMSE", wall: "Wall s", when: "When",
+    status: "Status", spentOf: "{0} / {1} s", nEvals: "{0} evals", gpus: "GPUs", util: "util",
+    mem: "mem", usedBy: "in use by {0}", free: "free", notInPool: "not used by this workspace", noGpu: "No GPU visible — CPU mode.",
+    model: "Model", task: "Task", title: "Title", state: "State", ready: "ready",
+    authoring: "authoring: {0}", failedAt: "failed at {0}", stages: "Authoring",
+    reference: "Reference", refBuilt: "built by an agent", refOperator: "from the operator",
+    estimate: "Estimated error", order: "Observed order",
+    reproduced: "Reproduced", yes: "yes", no: "no", tolerance: "tolerance",
+    levelDiff: "level vs next level", finestEst: "estimate for the finest",
+    authorAgent: "Author agent", problem: "problem.md", runIt: "Run it:",
+    notFound: "Not found.", workspace: "Workspace", back: "Overview", tFieldAt: "at",
+    stage_intake: "Intake", stage_author: "Author the package", stage_reference: "Reference",
+    stage_reference_check: "Check the reference", stage_validate: "Validate",
+    stage_smoke: "Smoke test", stage_anchor: "Measure the anchor", stage_finalize: "Ready",
+    st_done: "done", st_running: "running", st_failed: "failed", st_short: "short",
+    st_interrupted: "interrupted", st_stopped: "stopped", st_finished: "finished",
+    st_created: "created", st_pending: "pending", st_skipped: "skipped", st_ready: "ready",
+    st_measuring: "measuring", st_missing: "missing", st_unreadable: "unreadable",
+    st_clean: "clean", st_violated: "violated", st_unchecked: "unchecked",
+    integrity: "integrity", blocksOf: "{0}/{1} blocks", table: "Table", snapshot: "snapshot",
   };
   const store = {
     get(k) { try { return window.localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { window.localStorage.setItem(k, v); } catch { /* private mode */ } },
   };
-  let lang = store.get("pf-lang") || ((navigator.language || "").startsWith("zh") ? "zh" : "en");
   const T = (key, ...args) => {
-    let text = (I18N[lang] && I18N[lang][key]) ?? I18N.en[key] ?? key;
+    let text = TEXT[key] ?? key;
     args.forEach((a, i) => { text = text.replace(`{${i}}`, a); });
     return text;
   };
@@ -149,7 +111,7 @@
     const t = Date.parse(iso);
     if (Number.isNaN(t)) return iso;
     const d = (Date.now() - t) / 1000;
-    const fmt = new Intl.RelativeTimeFormat(lang === "zh" ? "zh-CN" : "en", { numeric: "auto" });
+    const fmt = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
     if (d < 60) return fmt.format(-Math.round(d), "second");
     if (d < 3600) return fmt.format(-Math.round(d / 60), "minute");
     if (d < 86400) return fmt.format(-Math.round(d / 3600), "hour");
@@ -457,6 +419,7 @@
     }
     updateRunHeader(run);
     updateTiles(run, prev);
+    fitScreen();  // the tiles above it are in place now
     renderScoreChart(document.getElementById("run-chart"), run, prev);
     renderGantt(document.getElementById("run-gantt"), run);
     await Promise.all([updatePlayer(run), updateFeed(run), updateSummary(run)]);
@@ -471,24 +434,43 @@
       h("div", { class: "page-title" }, h("h1", { id: "run-title" }), h("span", { class: "meta", id: "run-meta" }),
         h("span", { id: "run-status" })),
       h("div", { class: "tiles", id: "run-tiles" }),
-      h("section", { class: "card" }, h("h2", {}, T("progress")), h("p", { class: "sub", text: T("progressSub", timeLabel(run)) }),
-        h("div", { id: "run-chart" }),
-        h("div", { class: "legend" },
-          h("span", {}, h("i", { class: "k-dot" }), T("legendEval")),
-          h("span", {}, h("i", { class: "k-cur" }), T("legendCur")),
-          h("span", {}, h("i", { class: "k-line" }), T("legendBest")),
-          h("span", {}, h("i", { class: "k-dash" }), T("legendAnchor")),
-          h("span", {}, h("i", { class: "k-err" }), T("legendErr")))),
-      h("div", { class: "grid-2" },
-        h("section", { class: "card" }, h("h2", {}, T("field"), h("span", { class: "aside", id: "field-aside" })),
+      // What a run is doing now fits one desktop screen: the score and the
+      // blocks on the left, the field in the middle, the agent on the right.
+      h("div", { class: "cockpit", id: "run-cockpit" },
+        h("section", { class: "card c-progress" }, h("h2", {}, T("progress")),
+          h("p", { class: "sub", text: T("progressSub", timeLabel(run)) }),
+          h("div", { id: "run-chart" }),
+          h("div", { class: "legend" },
+            h("span", {}, h("i", { class: "k-dot" }), T("legendEval")),
+            h("span", {}, h("i", { class: "k-cur" }), T("legendCur")),
+            h("span", {}, h("i", { class: "k-line" }), T("legendBest")),
+            h("span", {}, h("i", { class: "k-dash" }), T("legendAnchor")),
+            h("span", {}, h("i", { class: "k-err" }), T("legendErr")))),
+        h("section", { class: "card c-field" }, h("h2", {}, T("field"), h("span", { class: "aside", id: "field-aside" })),
           h("p", { class: "sub", text: T("fieldSub") }), h("div", { id: "run-field", class: "field" })),
-        h("section", { class: "card" }, h("h2", {}, T("agent"), h("span", { class: "aside", id: "feed-aside" })),
-          h("div", { id: "run-feed", class: "feed", "aria-live": "polite" }))),
-      h("section", { class: "card" }, h("h2", {}, T("blocks")), h("div", { id: "run-gantt", class: "gantt" })),
-      h("section", { class: "card" }, h("h2", { id: "sum-h" }, T("summary")), h("div", { id: "run-summary", class: "md" })),
-      h("section", { class: "card" }, h("h2", {}, T("evalTable")), h("div", { id: "run-table" })),
+        h("section", { class: "card c-agent" }, h("h2", {}, T("agent"), h("span", { class: "aside", id: "feed-aside" })),
+          h("div", { id: "run-feed", class: "feed", "aria-live": "polite" })),
+        h("section", { class: "card c-blocks" }, h("h2", {}, T("blocks")), h("div", { id: "run-gantt", class: "gantt" }))),
+      // the record, below the fold
+      h("div", { class: "grid-2" },
+        h("section", { class: "card" }, h("h2", { id: "sum-h" }, T("summary")), h("div", { id: "run-summary", class: "md" })),
+        h("section", { class: "card" }, h("h2", {}, T("evalTable")), h("div", { id: "run-table" }))),
     );
   }
+
+  // The one-screen grids take the window's height below where they start.
+  function fitScreen() {
+    for (const el of app.querySelectorAll(".cockpit, .screen")) {
+      if (getComputedStyle(el).display !== "grid") { el.style.height = ""; continue; }
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      el.style.height = `${Math.max(460, window.innerHeight - top - 20)}px`;
+    }
+  }
+  // inside a fitted grid a chart takes the height it is given
+  const fitted = (el) => {
+    const grid = el.closest(".cockpit, .screen");
+    return !!grid && getComputedStyle(grid).display === "grid";
+  };
 
   function updateRunHeader(run) {
     document.getElementById("run-title").textContent = run.id;
@@ -538,7 +520,8 @@
 
   // ── score chart ──
   function renderScoreChart(host, run, prev) {
-    const W = Math.max(320, host.clientWidth || 800), H = 300;
+    const W = Math.max(320, host.clientWidth || 800);
+    const H = fitted(host) ? Math.max(200, host.clientHeight || 300) : 300;
     const m = { l: 56, r: 16, t: 22, b: 34 };
     const iw = W - m.l - m.r, ih = H - m.t - m.b;
     const evs = run.evals.filter((e) => !e.diag);
@@ -694,35 +677,85 @@
     return lut;
   }
 
+  // What the field window draws: the task's view.json when the run has a
+  // valid one (checked server-side against the archived coordinates and
+  // output heads), else a default worked out from the coordinates.
+  function resolveView(run) {
+    const grid = run.grid || {};
+    const coords = (grid.coords || []).slice(0, 3);
+    const fields = grid.fields && grid.fields.length ? grid.fields : ["u"];
+    if (run.view && run.view.axes && run.view.panels && run.view.panels.length) return run.view;
+    const isT = (c) => /^t(ime)?$/i.test(c);
+    const view = { axes: {}, panels: [] };
+    const t = coords.find(isT);
+    if (coords.length === 1) view.axes = { x: coords[0] };
+    else if (coords.length === 2) view.axes = t ? { x: coords.find((c) => c !== t), y: t } : { x: coords[0], y: coords[1] };
+    else if (coords.length >= 3) {
+      if (t) { const rest = coords.filter((c) => c !== t); view.axes = { x: rest[0], y: rest[1] }; view.time = t; }
+      else { view.axes = { x: coords[0], y: coords[1] }; view.slice = { axis: coords[2], at: 0.5 }; }
+    }
+    view.panels = fields.slice(0, 4).map((f) => ({ title: f, show: { op: "field", of: [f] }, colors: "auto" }));
+    return view;
+  }
+
+  // a panel's values, derived from the predicted heads only
+  function panelValues(show, fields) {
+    const cols = show.of.map((n) => fields[n] && fields[n].values);
+    if (cols.some((c) => !c)) return null;
+    if (show.op === "abs") return cols[0].map(Math.abs);
+    if (show.op === "magnitude") return cols[0].map((_, i) => Math.hypot(...cols.map((c) => c[i])));
+    return cols[0];
+  }
+
+  // Rows × columns, and each panel's width and height, that make n panels as
+  // large as the window allows. A panel keeps the domain's aspect unless
+  // `aspect` is null (a space-time map, whose axes share no unit): then it
+  // takes whatever shape its cell has.
+  function panelGrid(n, aspect, W, H, chrome) {
+    if (!Number.isFinite(H)) {
+      const cols = Math.max(1, Math.min(n, Math.floor(W / 300)));
+      const w = (W - 12 * (cols - 1)) / cols;
+      return { cols, rows: Math.ceil(n / cols), w, h: w * (aspect ?? 0.6) };
+    }
+    let best = null;
+    for (let cols = 1; cols <= n; cols++) {
+      const rows = Math.ceil(n / cols);
+      const cw = (W - 12 * (cols - 1)) / cols;
+      const ch = Math.max(30, (H - 12 * (rows - 1)) / rows - chrome);
+      const w = aspect == null ? cw : Math.max(40, Math.min(cw, ch / aspect));
+      const h = aspect == null ? ch : w * aspect;
+      if (!best || w * h > best.w * best.h * 1.01) best = { cols, rows, w, h };
+    }
+    return best;
+  }
+  const timeLike = (c) => /^t(ime)?$/i.test(c || "");
+
   class Player {
     constructor(host, run) {
       this.host = host;
       this.runId = run.id;
-      this.dims = (run.grid && run.grid.dims) || 2;
-      this.names = (run.grid && run.grid.coords) || ["x", "y"];
+      this.grid = run.grid || {};
+      this.coords = (this.grid.coords && this.grid.coords.length ? this.grid.coords : ["x", "y"]).slice(0, 3);
+      this.view = resolveView(run);
       this.frames = [];
       this.index = -1;
-      this.field = null;
-      this.tIndex = null;
+      this.step = null;
       this.follow = true;
       this.playing = false;
-      this.canvas = h("canvas", { width: 640, height: 400, "aria-label": T("field"),
-        onpointermove: (e) => this.hover(e), onpointerleave: hideTip });
+      this.panels = [];
       this.caption = h("div", { class: "caption" });
-      this.bar = h("canvas", { width: 256, height: 10 });
-      this.lo = h("span"); this.hi = h("span");
-      this.slider = h("input", { type: "range", min: "0", max: "0", value: "0",
+      this.grid_el = h("div", { class: "panels" });
+      this.box = h("div", { class: "canvas-box" }, this.grid_el);
+      this.slider = h("input", { type: "range", min: "0", max: "0", value: "0", "aria-label": T("field"),
         oninput: () => { this.follow = false; this.show(Number(this.slider.value)); } });
       this.playBtn = h("button", { class: "btn", type: "button", onclick: () => this.toggle() }, T("play"));
       this.latestBtn = h("button", { class: "btn", type: "button", onclick: () => { this.follow = true; this.show(this.frames.length - 1); } }, T("latest"));
-      this.fieldSel = h("select", { onchange: () => { this.field = this.fieldSel.value; this.draw(); } });
-      this.tSel = h("input", { type: "range", min: "0", max: "0", value: "0", hidden: true,
-        oninput: () => { this.tIndex = Number(this.tSel.value); this.draw(); } });
-      this.tLabel = h("span", { class: "muted" });
-      host.replaceChildren(this.caption, this.canvas,
-        h("div", { class: "colorbar" }, this.lo, this.bar, this.hi),
-        h("div", { class: "controls" }, this.playBtn, this.slider, this.latestBtn, this.fieldSel),
-        h("div", { class: "controls" }, this.tLabel, this.tSel));
+      this.stepSel = h("input", { type: "range", min: "0", max: "0", value: "0", hidden: true,
+        oninput: () => { this.step = Number(this.stepSel.value); this.draw(); } });
+      this.stepLabel = h("span", { class: "muted" });
+      this.stepRow = h("div", { class: "controls step", hidden: true }, this.stepLabel, this.stepSel);
+      host.replaceChildren(this.caption, this.box,
+        h("div", { class: "controls" }, this.playBtn, this.slider, this.latestBtn), this.stepRow);
     }
     stop() { clearInterval(this.timer); this.playing = false; }
     toggle() {
@@ -736,7 +769,7 @@
         i += 1;
         if (i >= this.frames.length) { this.stop(); this.playBtn.textContent = T("play"); this.follow = true; return; }
         this.show(i);
-      }, reduced ? 1400 : 900);
+      }, 900);
     }
     async update(frames) {
       const fresh = frames.filter((f) => f.run_best);
@@ -763,159 +796,224 @@
       this.slider.value = String(i);
       const meta = this.frames[i];
       this.data = await this.load(meta.frame);
-      const names = Object.keys(this.data.fields);
-      if (!this.field || !names.includes(this.field)) this.field = names[0];
-      this.fieldSel.replaceChildren(...names.map((n) => h("option", { value: n, text: n, selected: n === this.field })));
-      this.fieldSel.hidden = names.length < 2;
       this.caption.replaceChildren(h("b", { text: fmtScore(meta.rRMSE) }),
         h("span", { text: `${meta.block} · ${String(meta.candidate).split("/").pop()}` }),
         h("span", { class: "muted", text: `${i + 1} / ${this.frames.length}` }));
       if (!reduced) {
-        this.canvas.style.opacity = "0.35";
-        requestAnimationFrame(() => { this.draw(); this.canvas.style.opacity = "1"; });
+        this.grid_el.style.opacity = "0.35";
+        requestAnimationFrame(() => { this.draw(); this.grid_el.style.opacity = "1"; });
       } else this.draw();
+    }
+    // which rows are on screen: all of them, or one value of the time/slice coordinate
+    rows(cols) {
+      const v = this.view;
+      const name = v.time || (v.slice && v.slice.axis) || null;
+      const si = name ? this.coords.indexOf(name) : -1;
+      const all = cols[0].map((_, i) => i);
+      this.stepRow.hidden = si < 0;
+      this.stepSel.hidden = si < 0;
+      if (si < 0) return all;
+      const steps = [...new Set(cols[si])].sort((a, b) => a - b);
+      if (this.step == null || this.step >= steps.length) {
+        this.step = v.time ? steps.length - 1 : Math.round(((v.slice && v.slice.at) ?? 0.5) * (steps.length - 1));
+      }
+      this.stepSel.max = String(steps.length - 1);
+      this.stepSel.value = String(this.step);
+      const at = steps[this.step];
+      this.stepLabel.textContent = `${name} = ${Number(at.toPrecision(4))}`;
+      return all.filter((i) => cols[si][i] === at);
     }
     draw() {
       const d = this.data;
-      if (!d || !this.field) return;
-      const vals = d.fields[this.field].values, coords = d.coords;
-      let X = coords[0], Y = coords[1] || null, keep = null;
-      if (this.dims >= 3 && coords.length >= 3) {
-        const ts = [...new Set(coords[0])].sort((a, b) => a - b);
-        if (this.tIndex == null || this.tIndex >= ts.length) this.tIndex = ts.length - 1;
-        this.tSel.hidden = false;
-        this.tSel.max = String(ts.length - 1);
-        this.tSel.value = String(this.tIndex);
-        const t = ts[this.tIndex];
-        this.tLabel.textContent = `${this.names[0] || "t"} = ${Number(t.toPrecision(4))}`;
-        keep = coords[0].map((v, i) => (v === t ? i : -1)).filter((i) => i >= 0);
-        X = coords[1]; Y = coords[2];
+      if (!d) return;
+      const v = this.view, cols = d.coords;
+      const xi = this.coords.indexOf(v.axes.x);
+      const yi = v.axes.y != null ? this.coords.indexOf(v.axes.y) : -1;
+      if (xi < 0 || xi >= cols.length || (v.axes.y != null && (yi < 0 || yi >= cols.length))) {
+        if (this.view !== this.fallback) { this.view = this.fallback = resolveView({ grid: this.grid }); this.draw(); }
+        return;
       }
-      const idx = keep || vals.map((_, i) => i);
+      const idx = this.rows(cols);
+      const X = cols[xi], Y = yi >= 0 ? cols[yi] : null;
+      const shown = v.panels.map((p) => ({ p, vals: panelValues(p.show, d.fields) })).filter((q) => q.vals);
+      if (!shown.length) { this.grid_el.replaceChildren(h("div", { class: "empty", text: T("noFrames") })); return; }
+      let aspect = 0.45;
+      if (Y) {
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        for (let i = 0; i < X.length; i++) {
+          if (X[i] < x0) x0 = X[i]; if (X[i] > x1) x1 = X[i];
+          if (Y[i] < y0) y0 = Y[i]; if (Y[i] > y1) y1 = Y[i];
+        }
+        aspect = Math.min(1.6, Math.max(0.35, (y1 - y0) / Math.max(1e-12, x1 - x0)));
+      }
+      const fit = fitted(this.host);
+      const W = this.box.clientWidth || this.host.clientWidth || 600;
+      const H = fit ? this.box.clientHeight : Infinity;
+      const spaceTime = !!Y && (timeLike(v.axes.y) || timeLike(v.axes.x));
+      const lay = panelGrid(shown.length, spaceTime ? null : aspect, W, H, 46);
+      this.grid_el.style.gridTemplateColumns = `repeat(${lay.cols}, ${Math.floor(lay.w)}px)`;
+      while (this.panels.length < shown.length) {
+        const canvas = h("canvas", { width: 10, height: 10 });
+        const panel = { canvas, title: h("div", { class: "ptitle" }), bar: h("canvas", { width: 256, height: 8 }),
+          lo: h("span"), hi: h("span") };
+        panel.el = h("div", { class: "panel" }, panel.title, canvas, h("div", { class: "colorbar" }, panel.lo, panel.bar, panel.hi));
+        canvas.addEventListener("pointermove", (e) => this.hover(e, panel));
+        canvas.addEventListener("pointerleave", hideTip);
+        this.panels.push(panel);
+      }
+      this.grid_el.replaceChildren(...this.panels.slice(0, shown.length).map((p) => p.el));
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      shown.forEach((q, k) => this.drawPanel(this.panels[k], q, idx, X, Y, lay.w, lay.h, dpr));
+    }
+    drawPanel(panel, q, idx, X, Y, w, h, dpr) {
+      const vals = q.vals;
+      panel.title.textContent = q.p.title;
+      panel.label = q.p.title;
       let lo = Infinity, hi = -Infinity;
       for (const i of idx) { const v = vals[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
-      // diverging (centred on zero) only when both signs carry real weight;
-      // a mostly-positive field with small negative ripples reads better on
-      // one hue from its minimum to its maximum
-      const diverging = lo < 0 && hi > 0 && Math.min(-lo, hi) >= 0.2 * Math.max(-lo, hi);
-      if (diverging) { const a = Math.max(-lo, hi); lo = -a; hi = a; }
+      if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
+      // diverging centres on zero; "auto" uses it only when both signs carry real weight
+      const diverging = q.p.colors === "diverging" ||
+        (q.p.colors === "auto" && lo < 0 && hi > 0 && Math.min(-lo, hi) >= 0.2 * Math.max(-lo, hi));
+      if (diverging) { const a = Math.max(Math.abs(lo), Math.abs(hi)) || 1; lo = -a; hi = a; }
       if (hi === lo) hi = lo + 1;
       const lut = colormap(diverging);
-      const cw = this.host.clientWidth || 600;
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
-      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-      for (const i of idx) {
-        x0 = Math.min(x0, X[i]); x1 = Math.max(x1, X[i]);
-        if (Y) { y0 = Math.min(y0, Y[i]); y1 = Math.max(y1, Y[i]); }
+      const canvas = panel.canvas;
+      const Wp = Math.max(40, Math.round(w * dpr));
+      const Hp = Math.max(30, Math.round(h * dpr));
+      canvas.width = Wp; canvas.height = Hp;
+      canvas.style.width = `${Math.round(Wp / dpr)}px`;
+      canvas.style.height = `${Math.round(Hp / dpr)}px`;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, Wp, Hp);
+      if (!Y) {
+        panel.pick = null;
+        drawLine(ctx, idx, X, vals, lo, hi, Wp, Hp, dpr);
+        panel.bar.hidden = true;
+      } else {
+        panel.bar.hidden = false;
+        panel.pick = drawTensor(ctx, idx, X, Y, vals, lo, hi, lut, Wp, Hp) || drawSplat(ctx, idx, X, Y, vals, lo, hi, lut, Wp, Hp);
+        panel.pick.X = X; panel.pick.Y = Y; panel.pick.vals = vals;
+        drawBar(panel.bar, lut);
       }
-      const W = Math.round(cw * dpr);
-      if (!Y) { this.draw1d(idx, X, vals, lo, hi, x0, x1, W, dpr); return; }
-      const aspect = Math.min(1.1, Math.max(0.35, (y1 - y0) / Math.max(1e-12, x1 - x0)));
-      const Hh = Math.round(W * aspect);
-      this.canvas.width = W; this.canvas.height = Hh;
-      this.canvas.style.height = `${Math.round(Hh / dpr)}px`;
-      const ctx = this.canvas.getContext("2d");
-      if (this.drawTensor(ctx, idx, X, Y, vals, lo, hi, lut, W, Hh, dpr)) return;
-      const img = ctx.createImageData(W, Hh);
-      const pick = new Int32Array(W * Hh).fill(-1);
-      const n = idx.length;
-      const size = Math.max(1, Math.ceil(Math.sqrt((W * Hh) / n) * 1.25));
-      const half = Math.floor(size / 2);
-      for (const i of idx) {
-        const px = Math.round(((X[i] - x0) / Math.max(1e-12, x1 - x0)) * (W - 1));
-        const py = Math.round((1 - (Y[i] - y0) / Math.max(1e-12, y1 - y0)) * (Hh - 1));
-        const c = Math.max(0, Math.min(255, Math.round(((vals[i] - lo) / (hi - lo)) * 255)));
-        for (let dy = -half; dy < size - half; dy++) {
-          const yy = py + dy;
-          if (yy < 0 || yy >= Hh) continue;
-          for (let dx = -half; dx < size - half; dx++) {
-            const xx = px + dx;
-            if (xx < 0 || xx >= W) continue;
-            const o = yy * W + xx;
-            img.data[o * 4] = lut[c * 3]; img.data[o * 4 + 1] = lut[c * 3 + 1];
-            img.data[o * 4 + 2] = lut[c * 3 + 2]; img.data[o * 4 + 3] = 255;
-            pick[o] = i;
-          }
+      panel.lo.textContent = fmtScore(lo); panel.hi.textContent = fmtScore(hi);
+    }
+    hover(evt, panel) {
+      const pk = panel.pick;
+      if (!pk) return;
+      const r = panel.canvas.getBoundingClientRect();
+      const px = Math.floor(((evt.clientX - r.left) / r.width) * pk.W);
+      const py = Math.floor(((evt.clientY - r.top) / r.height) * pk.H);
+      const i = pk.pick[py * pk.W + px];
+      if (i == null || i < 0) { hideTip(); return; }
+      showTip(evt, [h("div", { class: "v", text: `${panel.label} = ${fmtScore(pk.vals[i])}` }),
+        h("div", { text: `${this.view.axes.x} ${Number(pk.X[i].toPrecision(4))} · ${this.view.axes.y} ${Number(pk.Y[i].toPrecision(4))}` })]);
+    }
+  }
+
+  // Points on a lattice render as an image of its own cells, scaled up with
+  // smoothing: exact, and far crisper than point splats. A lattice with holes —
+  // where a cylinder or an airfoil sits — leaves those cells empty. Returns the
+  // hover map, or null when the points are not on a lattice.
+  function drawTensor(ctx, idx, X, Y, vals, lo, hi, lut, W, H) {
+    const ux = [...new Set(idx.map((i) => X[i]))].sort((a, b) => a - b);
+    const uy = [...new Set(idx.map((i) => Y[i]))].sort((a, b) => a - b);
+    const nx = ux.length, ny = uy.length;
+    if (nx < 2 || ny < 2 || nx * ny > 2 * idx.length || nx * ny > 4e6) return null;
+    const ix = new Map(ux.map((v, k) => [v, k])), iy = new Map(uy.map((v, k) => [v, k]));
+    const off = document.createElement("canvas");
+    off.width = nx; off.height = ny;
+    const octx = off.getContext("2d");
+    const img = octx.createImageData(nx, ny);
+    const cell = new Int32Array(nx * ny).fill(-1);
+    for (const i of idx) {
+      const cx = ix.get(X[i]), cy = ny - 1 - iy.get(Y[i]);
+      const o = cy * nx + cx;
+      const c = Math.max(0, Math.min(255, Math.round(((vals[i] - lo) / (hi - lo)) * 255)));
+      img.data[o * 4] = lut[c * 3]; img.data[o * 4 + 1] = lut[c * 3 + 1];
+      img.data[o * 4 + 2] = lut[c * 3 + 2]; img.data[o * 4 + 3] = 255;
+      cell[o] = i;
+    }
+    octx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(off, 0, 0, W, H);
+    const pick = new Int32Array(W * H);
+    for (let py = 0; py < H; py++) {
+      const cy = Math.min(ny - 1, Math.floor((py / H) * ny));
+      for (let px = 0; px < W; px++) pick[py * W + px] = cell[cy * nx + Math.min(nx - 1, Math.floor((px / W) * nx))];
+    }
+    return { pick, W, H };
+  }
+
+  // Scattered points: each claims its pixel, then grows into the empty pixels
+  // around it for about one spacing between points. Gaps between samples
+  // fill; a hole much larger than that — a body the flow goes round — stays
+  // empty, as it should.
+  function drawSplat(ctx, idx, X, Y, vals, lo, hi, lut, W, H) {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const i of idx) {
+      if (X[i] < x0) x0 = X[i]; if (X[i] > x1) x1 = X[i];
+      if (Y[i] < y0) y0 = Y[i]; if (Y[i] > y1) y1 = Y[i];
+    }
+    let own = new Int32Array(W * H).fill(-1);
+    for (const i of idx) {
+      const px = Math.round(((X[i] - x0) / Math.max(1e-12, x1 - x0)) * (W - 1));
+      const py = Math.round((1 - (Y[i] - y0) / Math.max(1e-12, y1 - y0)) * (H - 1));
+      own[py * W + px] = i;
+    }
+    const reach = Math.max(1, Math.ceil(1.5 * Math.sqrt((W * H) / Math.max(1, idx.length))));
+    for (let pass = 0; pass < reach; pass++) {
+      const next = own.slice();
+      let grew = false;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const o = y * W + x;
+          if (own[o] >= 0) continue;
+          const n = (x > 0 && own[o - 1] >= 0) ? own[o - 1] : (x < W - 1 && own[o + 1] >= 0) ? own[o + 1]
+            : (y > 0 && own[o - W] >= 0) ? own[o - W] : (y < H - 1 && own[o + W] >= 0) ? own[o + W] : -1;
+          if (n >= 0) { next[o] = n; grew = true; }
         }
       }
-      ctx.putImageData(img, 0, 0);
-      this.pick = { pick, W, Hh, dpr, X, Y, vals };
-      this.drawBar(lut, lo, hi);
+      own = next;
+      if (!grew) break;
     }
-    drawTensor(ctx, idx, X, Y, vals, lo, hi, lut, W, Hh, dpr) {
-      // A tensor-product grid renders as an image of its own cells, scaled
-      // up with smoothing: exact, and far crisper than point splats.
-      const ux = [...new Set(idx.map((i) => X[i]))].sort((a, b) => a - b);
-      const uy = [...new Set(idx.map((i) => Y[i]))].sort((a, b) => a - b);
-      const nx = ux.length, ny = uy.length;
-      if (nx < 2 || ny < 2 || nx * ny !== idx.length || nx * ny > 4e6) return false;
-      const ix = new Map(ux.map((v, k) => [v, k])), iy = new Map(uy.map((v, k) => [v, k]));
-      const off = document.createElement("canvas");
-      off.width = nx; off.height = ny;
-      const octx = off.getContext("2d");
-      const img = octx.createImageData(nx, ny);
-      const cell = new Int32Array(nx * ny).fill(-1);
-      for (const i of idx) {
-        const cx = ix.get(X[i]), cy = ny - 1 - iy.get(Y[i]);
-        const o = cy * nx + cx;
-        const c = Math.max(0, Math.min(255, Math.round(((vals[i] - lo) / (hi - lo)) * 255)));
-        img.data[o * 4] = lut[c * 3]; img.data[o * 4 + 1] = lut[c * 3 + 1];
-        img.data[o * 4 + 2] = lut[c * 3 + 2]; img.data[o * 4 + 3] = 255;
-        cell[o] = i;
-      }
-      octx.putImageData(img, 0, 0);
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(off, 0, 0, W, Hh);
-      // hover: display pixel -> grid cell -> point
-      const pick = new Int32Array(W * Hh);
-      for (let py = 0; py < Hh; py++) {
-        const cy = Math.min(ny - 1, Math.floor((py / Hh) * ny));
-        for (let px = 0; px < W; px++) pick[py * W + px] = cell[cy * nx + Math.min(nx - 1, Math.floor((px / W) * nx))];
-      }
-      this.pick = { pick, W, Hh, dpr, X, Y, vals };
-      this.drawBar(lut, lo, hi);
-      return true;
+    const img = ctx.createImageData(W, H);
+    for (let o = 0; o < W * H; o++) {
+      const i = own[o];
+      if (i < 0) continue;
+      const c = Math.max(0, Math.min(255, Math.round(((vals[i] - lo) / (hi - lo)) * 255)));
+      img.data[o * 4] = lut[c * 3]; img.data[o * 4 + 1] = lut[c * 3 + 1];
+      img.data[o * 4 + 2] = lut[c * 3 + 2]; img.data[o * 4 + 3] = 255;
     }
-    draw1d(idx, X, vals, lo, hi, x0, x1, W, dpr) {
-      const Hh = Math.round(W * 0.4);
-      this.canvas.width = W; this.canvas.height = Hh;
-      this.canvas.style.height = `${Math.round(Hh / dpr)}px`;
-      const ctx = this.canvas.getContext("2d");
-      ctx.clearRect(0, 0, W, Hh);
-      const order = [...idx].sort((a, b) => X[a] - X[b]);
-      ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2 * dpr; ctx.beginPath();
-      order.forEach((i, k) => {
-        const px = ((X[i] - x0) / Math.max(1e-12, x1 - x0)) * (W - 8 * dpr) + 4 * dpr;
-        const py = (1 - (vals[i] - lo) / (hi - lo)) * (Hh - 8 * dpr) + 4 * dpr;
-        if (k) ctx.lineTo(px, py); else ctx.moveTo(px, py);
-      });
-      ctx.stroke();
-      this.pick = null;
-      this.drawBar(colormap(false), lo, hi);
+    ctx.putImageData(img, 0, 0);
+    return { pick: own, W, H };
+  }
+
+  // a 1-D field: the profile as a line, its range in the labels underneath
+  function drawLine(ctx, idx, X, vals, lo, hi, W, H, dpr) {
+    let x0 = Infinity, x1 = -Infinity;
+    for (const i of idx) { if (X[i] < x0) x0 = X[i]; if (X[i] > x1) x1 = X[i]; }
+    const order = [...idx].sort((a, b) => X[a] - X[b]);
+    ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, H - 1); ctx.lineTo(W, H - 1); ctx.stroke();
+    ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2 * dpr; ctx.beginPath();
+    order.forEach((i, k) => {
+      const px = ((X[i] - x0) / Math.max(1e-12, x1 - x0)) * (W - 8 * dpr) + 4 * dpr;
+      const py = (1 - (vals[i] - lo) / (hi - lo)) * (H - 8 * dpr) + 4 * dpr;
+      if (k) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+    });
+    ctx.stroke();
+  }
+
+  function drawBar(bar, lut) {
+    const ctx = bar.getContext("2d");
+    const img = ctx.createImageData(256, bar.height);
+    for (let x = 0; x < 256; x++) for (let y = 0; y < bar.height; y++) {
+      const o = (y * 256 + x) * 4;
+      img.data[o] = lut[x * 3]; img.data[o + 1] = lut[x * 3 + 1]; img.data[o + 2] = lut[x * 3 + 2]; img.data[o + 3] = 255;
     }
-    drawBar(lut, lo, hi) {
-      const ctx = this.bar.getContext("2d");
-      const img = ctx.createImageData(256, 10);
-      for (let x = 0; x < 256; x++) for (let y = 0; y < 10; y++) {
-        const o = (y * 256 + x) * 4;
-        img.data[o] = lut[x * 3]; img.data[o + 1] = lut[x * 3 + 1]; img.data[o + 2] = lut[x * 3 + 2]; img.data[o + 3] = 255;
-      }
-      ctx.putImageData(img, 0, 0);
-      this.lo.textContent = fmtScore(lo); this.hi.textContent = fmtScore(hi);
-    }
-    hover(evt) {
-      if (!this.pick) return;
-      const r = this.canvas.getBoundingClientRect();
-      const px = Math.floor(((evt.clientX - r.left) / r.width) * this.pick.W);
-      const py = Math.floor(((evt.clientY - r.top) / r.height) * this.pick.Hh);
-      const i = this.pick.pick[py * this.pick.W + px];
-      if (i == null || i < 0) { hideTip(); return; }
-      const nx = this.dims >= 3 ? this.names[1] : this.names[0];
-      const ny = this.dims >= 3 ? this.names[2] : this.names[1];
-      showTip(evt, [h("div", { class: "v", text: `${this.field} = ${fmtScore(this.pick.vals[i])}` }),
-        h("div", { text: `${nx || "x"} ${Number(this.pick.X[i].toPrecision(4))} · ${ny || "y"} ${Number(this.pick.Y[i].toPrecision(4))}` })]);
-    }
+    ctx.putImageData(img, 0, 0);
   }
 
   async function updatePlayer(run) {
@@ -1062,8 +1160,9 @@
           h("section", { class: "card" }, h("h2", {}, T("stages"), h("span", { class: "aside", id: "task-mode" })),
             h("div", { id: "task-steps", class: "stepper" })),
           h("section", { class: "card" }, h("h2", {}, T("reference")), h("div", { id: "task-ref" }))),
-        h("section", { class: "card" }, h("h2", {}, T("authorAgent")), h("div", { id: "task-feed", class: "feed" })),
-        h("section", { class: "card" }, h("h2", {}, T("problem")), h("div", { id: "task-problem", class: "md" })),
+        h("div", { class: "grid-2 even" },
+          h("section", { class: "card scroll" }, h("h2", {}, T("authorAgent")), h("div", { id: "task-feed", class: "feed" })),
+          h("section", { class: "card scroll" }, h("h2", {}, T("problem")), h("div", { id: "task-problem", class: "md" }))),
       );
       S.feed = { key: `task:${name}`, offset: null };
     }
@@ -1106,13 +1205,14 @@
     if (r.order != null) row(T("order"), r.order.toFixed(2));
     if (r.reproducible != null) row(T("reproduced"), r.reproducible ? T("yes") : T("no"));
     const parts = [h("table", {}, h("tbody", {}, rows))];
-    if (r.differences && r.differences.length) parts.push(convergenceChart(r));
+    if (r.differences && r.differences.length) parts.push(convergenceChart(r, host.clientWidth));
     for (const reason of r.reasons || []) parts.push(h("div", { class: "note", text: `✕ ${reason}` }));
     host.replaceChildren(...parts);
   }
 
-  function convergenceChart(r) {
-    const W = 420, H = 190, m = { l: 52, r: 14, t: 14, b: 30 };
+  function convergenceChart(r, width) {
+    // drawn at the width it is shown at, so its text stays the size of the page's
+    const W = Math.max(320, Math.min(900, width || 420)), H = 220, m = { l: 52, r: 14, t: 14, b: 30 };
     const d = r.differences;
     const all = d.concat(r.estimate ? [r.estimate] : [], r.tol ? [r.tol] : []).filter((v) => v > 0);
     let lo = Math.floor(Math.log10(Math.min(...all))), hi = Math.ceil(Math.log10(Math.max(...all)));
@@ -1180,17 +1280,11 @@
     S.frames.clear();
     route();
   });
-  const langBtn = document.getElementById("lang-btn");
-  const setLangLabel = () => { langBtn.textContent = lang === "zh" ? "EN" : "中"; document.documentElement.lang = lang === "zh" ? "zh-CN" : "en"; };
-  setLangLabel();
-  langBtn.addEventListener("click", () => {
-    lang = lang === "zh" ? "en" : "zh";
-    store.set("pf-lang", lang);
-    setLangLabel();
-    route();
-  });
   window.addEventListener("hashchange", route);
-  window.addEventListener("resize", () => { clearTimeout(window.__pfr); window.__pfr = setTimeout(() => refresh(), 200); });
+  window.addEventListener("resize", () => {
+    clearTimeout(window.__pfr);
+    window.__pfr = setTimeout(() => { fitScreen(); refresh(); }, 200);
+  });
   // a stream that dies silently still gets a refresh every few seconds
   if (!window.__PF_STATIC__) setInterval(() => { if (!document.hidden) refresh(); }, 15000);
 

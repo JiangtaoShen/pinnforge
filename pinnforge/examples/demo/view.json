@@ -1,0 +1,13 @@
+{
+  "axes": {
+    "x": "x",
+    "y": "y"
+  },
+  "panels": [
+    {
+      "title": "u",
+      "show": "u",
+      "colors": "auto"
+    }
+  ]
+}

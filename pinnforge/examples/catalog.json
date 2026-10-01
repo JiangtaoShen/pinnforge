@@ -5,29 +5,29 @@
       "name": "ldc",
       "title": "LDC \u2014 Lid-Driven Cavity",
       "url": "https://github.com/JiangtaoShen/pinnforge/releases/download/examples-v1/ldc.tar.gz",
-      "size": 1157033,
-      "sha256": "0f5bcaa3a2a2ef2a6fb786499e6d338c4508a8f4f172eac4c1af998f3e89a4b8"
+      "size": 1157231,
+      "sha256": "a964aedde777d32d48516cb335b67e1c9c97e947a94f0ec452e514f63257ae79"
     },
     {
       "name": "ks",
       "title": "KS \u2014 Kuramoto\u2013Sivashinsky",
       "url": "https://github.com/JiangtaoShen/pinnforge/releases/download/examples-v1/ks.tar.gz",
-      "size": 547555,
-      "sha256": "0e66aca5d591e2fbecc361edc40d979ec5939d02073f98cfea30c35ea6d3a895"
+      "size": 547663,
+      "sha256": "e30f07b5d0d5aa373f2b780e9bc9561357b2f784871733e1fa4e38d3661e0c17"
     },
     {
       "name": "cyl",
       "title": "CYL \u2014 von K\u00e1rm\u00e1n vortex street past a cylinder",
       "url": "https://github.com/JiangtaoShen/pinnforge/releases/download/examples-v1/cyl.tar.gz",
-      "size": 4343456,
-      "sha256": "90104a080bbcda1ec55a4192a05c1d0149fa71fac6dc25e31b574debd49e15bf"
+      "size": 4343633,
+      "sha256": "4b8bf597ebecd6a98bc498fbc01b4550cac71bb2903320f7a5fe2af1b22d4f3e"
     },
     {
       "name": "naca",
       "title": "NACA \u2014 flow over a NACA0012 airfoil",
       "url": "https://github.com/JiangtaoShen/pinnforge/releases/download/examples-v1/naca.tar.gz",
-      "size": 11397242,
-      "sha256": "46dc87d6bf2213e78819150452f527490fa6f7d22e4bd50254890543e351532a"
+      "size": 11397448,
+      "sha256": "3ee00827624179efadaddc8728cc257951e0623a4e70d9ac5aff624c37697f1d"
     }
   ]
 }

@@ -524,7 +524,8 @@ def run_detail(root: Path, run_id: str) -> dict:
         "blocks": blocks,
         "evals": evals,
         "frames": _frames(run),
-        "grid": _grid(run),
+        "grid": (grid := _grid(run)),
+        "view": _view(run, grid),
     })
     return out
 
@@ -577,6 +578,32 @@ def _grid(run: Path) -> dict | None:
     return {"coords": names(g.get("coords")), "fields": names(g.get("fields")),
             "points": _int(g.get("points")), "of": _int(g.get("of")),
             "dims": min(max(_int(g.get("dims"), 2), 1), 3)}
+
+
+def _view(run: Path, grid: dict | None) -> dict | None:
+    """The task's view.json as the run froze it, checked against what is archived.
+
+    The run directory is the block's to write, so the file is read like any
+    other untrusted one and kept only if it is a valid view of the archived
+    coordinates and output heads; otherwise the page draws its default.
+    """
+    from pinnforge.task import view
+    from pinnforge.ui import feeds
+
+    if not grid:
+        return None
+    raw = _read_bytes(run / "task" / view.VIEW_FILE, cap=view.MAX_BYTES + 1)
+    if raw is None or len(raw) > view.MAX_BYTES:
+        return None
+    try:
+        spec = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    shown, _ = view.check(spec, grid.get("coords") or [], grid.get("fields") or [])
+    if shown:
+        for panel in shown["panels"]:
+            panel["title"] = feeds.redact(panel["title"])
+    return shown
 
 
 def summary_md(root: Path, run_id: str, block: str) -> dict:

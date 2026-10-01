@@ -125,6 +125,7 @@ def validate(task_dir: Path, reference: bool = True) -> ValidationReport:
     _check_eval(rep, evalsrc)
     _check_data(rep, task_dir, reference, evalsrc)
     _check_sealed(rep, task_dir, problem, baseline, evalsrc)
+    _check_view(rep, task_dir)
     if reference:
         _check_reference(rep, task_dir, evalsrc)
     _check_agreement(rep, problem, baseline, evalsrc)
@@ -156,6 +157,25 @@ _FILE_NAME = re.compile(r"[\w.\-/\\]+")
 
 def _names_private(text: str) -> bool:
     return text.strip() == PRIVATE_DIR or _PRIVATE_PATH.search(text) is not None
+
+
+def _check_view(rep: ValidationReport, task_dir: Path) -> None:
+    """`view.json`, if the task has one: what the dashboard's field window draws."""
+    from pinnforge.task import view
+
+    path = task_dir / view.VIEW_FILE
+    if not path.is_file():
+        rep.check("view.json (optional) — the dashboard picks a default view", True)
+        return
+    spec = view.load(path)
+    coords, fields = view.task_axes(task_dir)
+    shown, problems = view.check(spec, coords, fields)
+    rep.check("view.json draws the task's own coordinates and output heads",
+              shown is not None, "; ".join(problems[:3]))
+    titles = " ".join(p.get("title", "") for p in (shown or {}).get("panels", []))
+    m = _solution_words(titles)
+    rep.check("view.json says nothing about the solution", m is None,
+              f"mentions {m.group(0)!r}" if m else "")
 
 
 def _solution_words(text: str):

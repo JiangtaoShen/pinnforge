@@ -14,6 +14,7 @@ from pathlib import Path
 
 from pinnforge import paths
 from pinnforge.task import contract
+from pinnforge.task.view import VIEW_FILE
 
 # The shared evaluation machinery, and the name it is vendored under in a run.
 KIT_SOURCE = Path(__file__).resolve().parent / "evalkit.py"
@@ -184,10 +185,12 @@ def fingerprint(task_dir: Path) -> dict:
     if contract.KIT_MODULE in (task_dir / "eval.py").read_text(encoding="utf-8"):
         vendored = task_dir / KIT_FILE
         files[KIT_FILE] = file_md5(vendored if vendored.is_file() else KIT_SOURCE)
+    # view.json decides what the dashboard draws, not what anything scores
     data = {
         p.name: file_md5(p)
         for p in sorted(task_dir.iterdir())
-        if p.is_file() and p.name not in contract.CONTRACT_FILES and p.name != KIT_FILE
+        if p.is_file() and p.name not in contract.CONTRACT_FILES
+        and p.name not in (KIT_FILE, VIEW_FILE)
     }
     return {"schema": FINGERPRINT_SCHEMA, "files": files, "data": data}
 

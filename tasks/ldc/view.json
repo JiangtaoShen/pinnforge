@@ -1,0 +1,28 @@
+{
+  "axes": {
+    "x": "x",
+    "y": "y"
+  },
+  "panels": [
+    {
+      "title": "speed |V|",
+      "show": {
+        "magnitude": [
+          "u",
+          "v"
+        ]
+      },
+      "colors": "sequential"
+    },
+    {
+      "title": "u",
+      "show": "u",
+      "colors": "diverging"
+    },
+    {
+      "title": "v",
+      "show": "v",
+      "colors": "diverging"
+    }
+  ]
+}
