@@ -178,7 +178,7 @@ def test_running_outside_a_project_says_so(tmp_path, monkeypatch):
     """A missing project must not look like an empty task library."""
     monkeypatch.delenv("PINNFORGE_ROOT", raising=False)
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(paths.ProjectNotFound, match="no PINNForge project"):
+    with pytest.raises(paths.ProjectNotFound, match="no PINNForge workspace"):
         paths.project_root()
 
 
@@ -270,3 +270,17 @@ def test_the_run_directory_carries_what_the_charter_names(tmp_path, monkeypatch)
                   "kb1", "pyproject.toml", "uv.lock"):
         assert (run / named).exists(), named
     assert (run / "pyproject.toml").is_symlink(), "one environment, one manifest"
+
+
+def test_a_mixed_pool_is_filed_under_the_card_b00_is_measured_on(project, monkeypatch):
+    """The whole pool's class is a list of names no single-card anchor could match."""
+    from pinnforge import gpus
+
+    inv = [gpus.Gpu(0, "GPU-a", "NVIDIA RTX A6000", 49140),
+           gpus.Gpu(1, "GPU-b", "NVIDIA A100", 81920)]
+    monkeypatch.setattr(gpus, "inventory", lambda timeout=20.0: inv)
+    cfg = RunConfig(task="ldc")
+    cfg.sandbox.gpus = [1, 0]
+    run = layout.create_run(cfg)
+    assert RunConfig.load(paths.config_path(run)).hw == {"platform": "gpu",
+                                                         "gpu": "NVIDIA A100"}

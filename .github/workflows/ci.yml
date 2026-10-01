@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # `uv run` re-syncs the default groups (dev + the multi-GB JAX `stack`)
+      # before every command unless told not to; the environment is the one
+      # `uv sync` below made, and nothing else.
+      UV_NO_SYNC: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      # The fast suite needs no JAX: skip the multi-GB CUDA stack group.
+      - run: uv sync --no-default-groups --group dev
+      - name: the JAX stack stayed out
+        run: uv run python -c "import importlib.util as u; assert u.find_spec('jax') is None"
+      - run: uv run ruff check .
+      - run: uv run pytest tests/ -q
+      - name: the installer script parses
+        run: sh -n install.sh

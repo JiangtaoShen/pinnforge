@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 import time
+from pathlib import Path
 
+from pinnforge import bindings
+from pinnforge.config import AgentConfig
 from pinnforge.runtime import registry
 
 
@@ -22,47 +26,65 @@ def cmd_list(args) -> int:
 # One prompt, identical for every runtime, so the replies are comparable.
 PING_PROMPT = "Reply with just the word: ok"
 
-# How each CLI is put into non-interactive mode for a single exchange. The
-# argv is the adapter's, minus everything a block needs and a ping does not.
-PING_ARGV = {
-    "claude_code": lambda cmd, model: [cmd, "-p", PING_PROMPT, "--model", model],
-    "codex": lambda cmd, model: [cmd, "exec", PING_PROMPT],
-    "cursor_agent": lambda cmd, model: [cmd, "--print", PING_PROMPT],
-    "opencode": lambda cmd, model: [cmd, "run", "--model", model, PING_PROMPT],
-}
 
-
-def _ping(runtime: str, command: str, model: str, timeout: float) -> tuple[bool, str]:
-    """Send one prompt through the CLI and its model. Exit 0 and output, or why not.
+def ping(agent: AgentConfig, timeout: float = 120.0) -> tuple[bool, str, str]:
+    """Send one prompt through the binding exactly as a block would be started.
 
     `--version` proves a binary is installed, which is not the question a run
     needs answered: the credentials, the provider config and the model id have
     to work too, and each of those fails at the first block instead — an hour
     in, with a run directory and a measured anchor already paid for.
+
+    The ping goes through the runtime adapter itself — the same argv, model
+    flag and environment handling a block gets — rather than a hand-written
+    command line per harness. The old hand-written forms dropped `--model`
+    for two of the four harnesses, so a typo in the model id pinged fine and
+    failed at the first block anyway.
+
+    Returns (ok, detail, the model id the harness reports having run).
     """
-    build = PING_ARGV.get(runtime)
-    if build is None:
-        return False, f"no non-interactive form known for {runtime!r}"
-    if not model:
-        return False, "no model to ping with; pass --model"
-    started = time.monotonic()
     try:
-        out = subprocess.run(
-            build(command, model), capture_output=True, text=True, timeout=timeout, check=False
-        )
-    except subprocess.TimeoutExpired:
-        return False, f"no reply within {timeout:g}s"
-    except OSError as e:
-        return False, f"could not run {command}: {e}"
-    took = time.monotonic() - started
-    reply = (out.stdout or "").strip()
-    if out.returncode != 0:
-        err = (out.stderr or "").strip().splitlines()
-        return False, f"exit {out.returncode} in {took:.1f}s: {(err[0] if err else '')[:110]}"
-    if not reply:
-        return False, f"exit 0 in {took:.1f}s but said nothing"
-    first = reply.splitlines()[0]
-    return True, f"{took:.1f}s, replied {first[:40]!r}"
+        runtime = registry.get_runtime(agent.runtime)
+        model = registry.resolve_model(runtime, agent.model)
+    except (KeyError, ValueError) as e:
+        return False, str(e).strip('"'), ""
+    started = time.monotonic()
+    with tempfile.TemporaryDirectory(prefix="pinnforge-ping-") as tmp:
+        log = Path(tmp) / "ping.log"
+        try:
+            handle = runtime.start(
+                block_id="ping",
+                cwd=Path(tmp),
+                prompt=PING_PROMPT,
+                model=model,
+                log_path=log,
+                env={"PINNFORGE_ROLE": "ping"},
+                command=agent.command or None,
+                runtime_options=agent.runtime_options,
+            )
+        except (OSError, ValueError) as e:
+            return False, f"could not start {agent.runtime}: {e}", ""
+        rc = handle.wait(timeout=timeout)
+        if rc is None:
+            handle.stop()
+            return False, f"no reply within {timeout:g}s", ""
+        handle.close()
+        took = time.monotonic() - started
+        text = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
+        resolved = ""
+        extract = getattr(runtime, "extract_usage", None)
+        if extract is not None:
+            try:
+                resolved = extract(log).model
+            except (OSError, ValueError):
+                resolved = ""
+    if rc != 0:
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        return False, f"exit {rc} in {took:.1f}s: {(lines[-1] if lines else '')[:140]}", ""
+    if not text.strip():
+        return False, f"exit 0 in {took:.1f}s but said nothing", ""
+    ran = f", ran {resolved}" if resolved and resolved != model else ""
+    return True, f"{took:.1f}s{ran}", resolved
 
 
 def cmd_doctor(args) -> int:
@@ -94,7 +116,7 @@ def cmd_doctor(args) -> int:
             print(f"  [OK]   {name:<14} {version}")
             if args.ping:
                 model = args.model or row["default_model"]
-                ok, detail = _ping(name, cmd, model, args.ping_timeout)
+                ok, detail, _ = ping(AgentConfig(runtime=name, model=model), args.ping_timeout)
                 mark = "[PING]" if ok else "[FAIL]"
                 print(f"  {mark} {name:<14} {model or '(no model)'} — {detail}")
                 failures += 0 if ok else 1
@@ -108,8 +130,38 @@ def cmd_doctor(args) -> int:
     return 0 if failures == 0 else 1
 
 
+def cmd_bindings(args) -> int:
+    data = bindings.load()
+    if not data["bindings"]:
+        print("no agent bindings yet — create one with `pinnforge setup`")
+        return 0
+    default = data.get("default")
+    print(f"   {'name':<18} {'runtime':<13} model")
+    for name, b in sorted(data["bindings"].items()):
+        mark = "*" if name == default else " "
+        print(f" {mark} {name:<18} {b.get('runtime', ''):<13} {b.get('model', '')}")
+    print(f"\n* default   (file: {bindings.path()})")
+    return 0
+
+
+def cmd_remove(args) -> int:
+    for name in args.names:
+        bindings.remove(name)
+        print(f"removed binding {name}")
+    return 0
+
+
+def cmd_default(args) -> int:
+    bindings.get(args.name)  # raises with the known names if it is not one
+    data = bindings.load()
+    data["default"] = args.name
+    bindings.save(data)
+    print(f"default agent binding: {args.name}")
+    return 0
+
+
 def register(sub) -> None:
-    p = sub.add_parser("agents", help="coding-agent harnesses")
+    p = sub.add_parser("agents", help="coding-agent harnesses and bindings")
     s = p.add_subparsers(dest="agents_cmd", required=True)
 
     s.add_parser("list", help="list known runtimes").set_defaults(func=cmd_list)
@@ -125,3 +177,13 @@ def register(sub) -> None:
     doc.add_argument("--model", default="", help="model to ping with (default: the runtime's)")
     doc.add_argument("--ping-timeout", type=float, default=120.0)
     doc.set_defaults(func=cmd_doctor)
+
+    s.add_parser("bindings", help="list the agent bindings `pinnforge setup` made").set_defaults(
+        func=cmd_bindings
+    )
+    rm = s.add_parser("remove", help="delete agent bindings")
+    rm.add_argument("names", nargs="+")
+    rm.set_defaults(func=cmd_remove)
+    df = s.add_parser("default", help="make a binding the default")
+    df.add_argument("name")
+    df.set_defaults(func=cmd_default)

@@ -102,8 +102,15 @@ def test_editing_the_charter_is_caught(run):
 
 def test_editing_the_corpus_is_caught(run):
     man = _snap(run)
-    (paths.kb1_dir() / "001_2019_A_paper.md").write_text("# altered\n", encoding="utf-8")
+    (run / "kb1" / "001_2019_A_paper.md").write_text("# altered\n", encoding="utf-8")
     assert any("001_2019" in x.path for x in integrity.verify(run, man))
+
+
+def test_growing_the_shared_corpus_mid_run_is_not_the_blocks_doing(run):
+    """`kb1 add` during a live run must not be charged to the running block."""
+    man = _snap(run)
+    (paths.kb1_dir() / "001_2019_A_paper.md").write_text("# altered\n", encoding="utf-8")
+    assert integrity.verify(run, man) == []
 
 
 def test_own_ledger_may_grow_but_not_change(run):
@@ -162,3 +169,38 @@ def test_manifest_round_trips(run):
     path = integrity.save(run, man, segment=2)
     back = integrity.Manifest.from_dict(json.loads(path.read_text(encoding="utf-8")))
     assert back.block == man.block and back.files == man.files
+
+
+def test_a_manifest_without_a_verdict_is_reported_not_skipped(run):
+    """Counting verdicts alone made an unchecked dispatch look as if it never happened."""
+    man = _snap(run)
+    integrity.save(run, man, segment=0)
+    integrity.record_result(run, "b02", 0, integrity.verify(run, man))
+    integrity.save(run, _snap(run), segment=1)  # dispatched, never verified
+    report = integrity.audit(run)
+    assert report["segments_checked"] == 1
+    assert report["unverified"] == [{"block": "b02", "segment": 1, "reason": "no verdict"}]
+    assert not report["clean"], "a partly unchecked run is not a clean one"
+
+
+def test_segments_are_numbered_across_invocations_and_never_overwritten(run):
+    first = integrity.save(run, _snap(run))
+    assert integrity.segment_of(first) == 0
+    integrity.record_result(run, "b02", 0, [integrity.Violation("x", "modified")])
+    assert integrity.next_segment(run, "b02") == 1, "a resumed block carries on from 1"
+    second = integrity.save(run, _snap(run))
+    assert integrity.segment_of(second) == 1
+    assert integrity.next_segment(run, "b03") == 0, "numbering is per block"
+    with pytest.raises(FileExistsError):
+        integrity.save(run, _snap(run), segment=0)
+    verdict = json.loads(integrity.result_path(run, "b02", 0).read_text(encoding="utf-8"))
+    assert verdict["clean"] is False, "the earlier verdict is still there"
+
+
+def test_a_name_planted_ahead_of_time_moves_the_manifest_on(run):
+    d = run / integrity.MANIFEST_DIR
+    d.mkdir(exist_ok=True)
+    (d / "b02.0.json").symlink_to(run / "elsewhere.json")
+    path = integrity.save(run, _snap(run))
+    assert integrity.segment_of(path) == 1
+    assert not (run / "elsewhere.json").exists()

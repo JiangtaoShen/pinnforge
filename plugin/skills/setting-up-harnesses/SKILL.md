@@ -1,96 +1,93 @@
 ---
 name: setting-up-harnesses
-description: Pick, install and authenticate the coding-agent CLI that drives PINNForge blocks — claude_code, codex, cursor_agent or opencode — and prove the binding works with `pinnforge agents doctor --ping` before spending a run on it. Use whenever a run dies on its first block, `agents doctor` reports MISS or FAIL, a model id is rejected, a provider needs configuring (OpenCode with DeepSeek or any OpenAI-compatible endpoint), or the user asks which harness to use or how to point PINNForge at a different model.
+description: Choose, install, authenticate and prove the coding-agent CLI that drives PINNForge blocks — claude_code, codex, cursor_agent or opencode — with `pinnforge setup` (named bindings pinned to exact model ids) and `pinnforge doctor --ping`. Use whenever a run dies on its first block, doctor reports a missing or failing agent, a model id is rejected, a provider needs configuring (OpenCode with DeepSeek or any OpenAI-compatible endpoint), or the user asks which agent or model to use.
 ---
 
-# Setting up a harness
+# Setting up the agent that runs blocks
 
-PINNForge does not talk to a model. It starts a coding-agent CLI as a
-subprocess, waits, and reads the filesystem. Every adapter delivers the **same
-block**: identical charter, prompt, working directory and environment. Only the
-argv that selects headless mode differs.
+PINNForge does not talk to a model. It starts a coding-agent CLI headlessly,
+waits, and reads the filesystem. Every harness gets the **same block**:
+identical charter, prompt, working directory and environment.
 
-| `agent.runtime` | CLI | default model |
+| runtime | CLI | default model |
 |---|---|---|
-| `claude_code` (default) | `claude` | `claude-opus-4-8` |
+| `claude_code` | `claude` | `claude-opus-4-8` |
 | `codex` | `codex` | `gpt-5.4` |
 | `cursor_agent` | `cursor-agent` | `auto` |
-| `opencode` | `opencode` | none; pass `--model` |
+| `opencode` | `opencode` | none — name one (`provider/id`) |
+
+## `pinnforge setup`
+
+Once per machine. It finds the installed CLIs, asks for an exact model id for
+each one worth using, **pings it through the very adapter a block is started
+with**, and saves a named binding in `~/.config/pinnforge/agents.yaml`:
 
 ```bash
-pinnforge agents list                                     # what is installed
-pinnforge agents doctor --ping --model <id>               # does the binding answer
+pinnforge setup                                    # the wizard
+pinnforge setup agent --name opus --runtime claude_code --model claude-opus-4-8 --default
+pinnforge agents bindings                          # list; * marks the default
+pinnforge agents default deepseek                  # switch the default
 ```
+
+In a workspace on a GPU machine the wizard also offers to change which cards
+the workspace's runs use; `pinnforge setup gpus 0,1` (or `1`, `all`, `none`)
+does only that, and `--user` sets the default for every workspace here (a
+workspace whose `pinnforge.yaml` leaves `sandbox.gpus` null, as `init` writes
+it unless cards were chosen, follows that default).
+
+Runs use the default binding unless given `--agent <name>` (or `--runtime` and
+`--model`). A workspace can pin its own with `agent: <name>` in `pinnforge.yaml`.
 
 ## The ping is the point
 
-`--version` proves a binary exists, which is not the question a run needs
-answered. Credentials, provider config and the model id all have to work too,
-and each of them otherwise fails at the first block: an hour in, with a run
-directory and a measured anchor already paid for. A good result looks like:
+`--version` proves a binary exists. Credentials, the provider config and the
+model id all have to work too, and otherwise fail at the first block — an hour
+in, with a measured anchor already paid for.
 
-```
-[OK]   opencode       1.18.18
-[PING] opencode       deepseek/deepseek-chat — 2.6s, replied 'ok'
+```bash
+pinnforge doctor --ping          # the default binding, end to end
+pinnforge agents doctor --ping   # every installed CLI
 ```
 
 ## Pin an exact id, never an alias
 
-`opus` meant `claude-opus-4-8` for a year and `claude-opus-5` after. A run
-pinned to the alias is not pinned. Whatever was asked for, the id the harness
-*actually ran* is read back out of its log into `run_usage.jsonl`, `state.json`
-and the summary; `run status` shows both when they differ.
+`opus` meant `claude-opus-4-8` for a year and `claude-opus-5` after. The id the
+harness *actually ran* is read back from its log into the run's ledger, state
+and summary; `run status` shows both when they differ.
 
 ## OpenCode with a provider it does not ship
 
-OpenCode fronts many providers, which is why this repo gives it no default
-model: any id picked here would be a guess, and a guess that runs is worse than
-one that does not, because the ledger records it as though it were chosen.
-
 Configure the provider in `~/.config/opencode/opencode.json` (outside any
-PINNForge project) and keep the key in the environment:
+workspace) and keep the key in the environment:
 
 ```json
-{
-  "provider": {
-    "deepseek": {
-      "options": {
-        "baseURL": "https://api.deepseek.com",
-        "apiKey": "{env:DEEPSEEK_API_KEY}"
-      }
-    }
-  }
-}
+{ "provider": { "deepseek": { "options": {
+    "baseURL": "https://api.deepseek.com", "apiKey": "{env:DEEPSEEK_API_KEY}" } } } }
 ```
 
 ```bash
 export DEEPSEEK_API_KEY=...
-pinnforge agents doctor --ping --model deepseek/deepseek-chat
-pinnforge run start -t ldc --runtime opencode --model deepseek/deepseek-chat -n 2
+pinnforge setup agent --name deepseek --runtime opencode --model deepseek/deepseek-chat
 ```
 
-## Troubleshooting matrix
+## Troubleshooting
 
 | symptom | cause | fix |
 |---|---|---|
-| `runtime 'opencode' states no default model` | no `--model` | pass `--model provider/id`; the refusal is deliberate |
-| OpenCode hangs at `init`, no output, no exit | a killed run left its session DB wedged | remove `~/.local/share/opencode/opencode.db-{wal,shm}` while no opencode is running |
-| OpenCode hangs after adding a provider | an `"npm"` field in the provider block makes it fetch a package | drop `npm`; built-in providers need only `baseURL` + `apiKey` |
-| `opencode run --format json` produces nothing | broken in 1.18.x | do not use it; the adapter parses the `--print-logs` stream instead |
-| `[MISS] <runtime> ... not on PATH` | CLI not installed | install it, or pick another `--runtime` |
-| ping returns exit 0 but empty output | auth expired | re-authenticate that CLI directly |
+| `runtime 'opencode' states no default model` | no model named | bind one: `setup agent … --model provider/id` |
+| OpenCode hangs at start, no output | a killed run left its session DB wedged | remove `~/.local/share/opencode/opencode.db-{wal,shm}` while no opencode runs |
+| OpenCode hangs after adding a provider | an `"npm"` field in the provider block | drop `npm`; built-in providers need only `baseURL` + `apiKey` |
+| ping: exit 0 but empty | expired auth | re-authenticate that CLI directly |
+| doctor: agent CLI not on PATH | not installed | install and sign in, or bind another runtime |
 
-## A harness this repo has never heard of
+## A harness PINNForge has never heard of
 
-Point `agent.runtime` at `module.path:ClassName`. Anything implementing the
-`AgentRuntime` protocol in `pinnforge/runtime/base.py` works: `start`,
-`extract_session_id`, `extract_usage`, `default_model`, `default_command`.
+Set the runtime to `module.path:ClassName` — anything implementing the
+`AgentRuntime` protocol in `pinnforge/runtime/base.py`.
 
-## Do not put instruction files at a PINNForge project root
+## Never put instruction files above a workspace's runs
 
-Blocks run with `runs/<id>/` as their working directory, and some CLIs walk up
-the tree for `AGENTS.md` or `.cursor/rules/`. A file like that at the project
-root is an ancestor of every run directory, so it is read by every block and
-silently changes what a block is. Keep operator-facing instructions inside
-`plugin/`, or in the project you are driving PINNForge *from*, never at the root
-of the PINNForge checkout itself.
+Blocks run in `runs/<id>/`, and several CLIs read `CLAUDE.md`, `AGENTS.md` or
+`.cursor/rules/` from every ancestor directory. One at the workspace root (or
+above it) is read by every block and silently changes what a block is.
+`pinnforge doctor` warns about any it finds.

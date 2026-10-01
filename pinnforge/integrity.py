@@ -24,6 +24,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
+import tempfile
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -104,7 +108,11 @@ def _protected(run: Path, block: str, root: Path) -> list[Path]:
             elif child.is_dir() and child.name != block:
                 out += [p for p in child.rglob("*") if p.is_file()]
 
-    kb1 = paths.kb1_dir(root)
+    # The run's own copy of the corpus; a run created before corpora were
+    # copied links to the shared one, which is then what it reads.
+    kb1 = run / "kb1"
+    if not kb1.is_dir():
+        kb1 = paths.kb1_dir(root)
     if kb1.is_dir():
         out += list(kb1.glob("*.md"))
 
@@ -170,44 +178,126 @@ def manifest_path(run: Path, block: str, segment: int) -> Path:
     return d / f"{block}.{segment}.json"
 
 
-def save(run: Path, man: Manifest, segment: int) -> Path:
-    path = manifest_path(run, man.block, segment)
-    path.write_text(json.dumps(man.to_dict(), indent=2) + "\n", encoding="utf-8")
-    return path
+def result_path(run: Path, block: str, segment: int) -> Path:
+    return run / MANIFEST_DIR / f"{block}.{segment}.result.json"
+
+
+_ENTRY = re.compile(r"^(?P<block>b\d+)\.(?P<segment>\d+)(?P<result>\.result)?\.json$")
+
+
+def _entries(run: Path):
+    """(block, segment, is_result, path) for every manifest and verdict on disk."""
+    d = run / MANIFEST_DIR
+    if not d.is_dir():
+        return
+    for f in d.iterdir():
+        if m := _ENTRY.match(f.name):
+            yield m["block"], int(m["segment"]), bool(m["result"]), f
+
+
+def next_segment(run: Path, block: str) -> int:
+    """The first segment number no earlier dispatch of `block` has used.
+
+    Segments are numbered per block across every invocation of the driver,
+    not per `_run_one`: numbering from 0 again in a resumed block wrote its
+    first manifest and verdict over the ones an earlier dispatch had left —
+    and with them, any violation that dispatch was caught in.
+    """
+    used = [seg for b, seg, _, _ in _entries(run) if b == block]
+    return max(used, default=-1) + 1
+
+
+def segment_of(path: Path) -> int:
+    m = _ENTRY.match(Path(path).name)
+    if m is None:
+        raise ValueError(f"not an integrity manifest: {path}")
+    return int(m["segment"])
+
+
+def save(run: Path, man: Manifest, segment: int | None = None) -> Path:
+    """Write the manifest — never over one already written.
+
+    With no `segment`, the next free number for the block is taken, and a
+    name that turns out to be taken (one planted in advance) moves it on
+    rather than being written over.
+    """
+    seg = next_segment(run, man.block) if segment is None else segment
+    data = (json.dumps(man.to_dict(), indent=2) + "\n").encode()
+    while True:
+        path = manifest_path(run, man.block, seg)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        except FileExistsError:
+            if segment is not None:
+                raise
+            seg += 1
+            continue
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        return path
 
 
 def record_result(run: Path, block: str, segment: int, violations: list[Violation]) -> Path:
-    """Write the verdict next to the manifest — the artefact a reader checks."""
-    path = run / MANIFEST_DIR / f"{block}.{segment}.result.json"
+    """Write the verdict next to the manifest — the artefact a reader checks.
+
+    Through a fresh temporary and a rename: `.integrity/` sits in the run
+    directory the block works in, so a verdict planted there in advance is
+    replaced, never written through.
+    """
+    path = result_path(run, block, segment)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "block": block,
-                "segment": segment,
-                "clean": not violations,
-                "violations": [{"path": v.path, "kind": v.kind, "detail": v.detail}
-                               for v in violations],
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    text = json.dumps(
+        {
+            "block": block,
+            "segment": segment,
+            "clean": not violations,
+            "violations": [{"path": v.path, "kind": v.kind, "detail": v.detail}
+                           for v in violations],
+        },
+        indent=2,
+    ) + "\n"
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        with suppress(OSError):
+            os.unlink(tmp)
+        raise
     return path
 
 
 def audit(run: Path) -> dict:
-    """Summarise every verdict in a run — backs `pinnforge run audit`."""
-    d = run / MANIFEST_DIR
-    checked, dirty = 0, []
-    if d.is_dir():
-        for f in sorted(d.glob("*.result.json")):
-            try:
-                r = json.loads(f.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            checked += 1
-            if not r.get("clean", True):
-                dirty.append(r)
-    return {"segments_checked": checked, "violations": dirty, "clean": not dirty}
+    """Summarise every verdict in a run — backs `pinnforge run audit`.
+
+    A manifest without a verdict is reported, not skipped: a dispatch whose
+    result was never written is an unchecked one, and counting only verdicts
+    made such a run look smaller and fully checked rather than partly
+    unchecked. (The segment a live run is dispatching right now is one of
+    these until it ends.)
+    """
+    checked, dirty, unverified = 0, [], []
+    manifests, verdicts = {}, {}
+    for block, seg, is_result, f in _entries(run):
+        (verdicts if is_result else manifests)[(block, seg)] = f
+    for key in sorted(verdicts, key=lambda k: (int(k[0][1:]), k[1])):
+        try:
+            r = json.loads(verdicts[key].read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            r = None
+        if not isinstance(r, dict):
+            unverified.append({"block": key[0], "segment": key[1], "reason": "unreadable verdict"})
+            continue
+        checked += 1
+        if not r.get("clean", True):
+            dirty.append(r)
+    for key in sorted(manifests, key=lambda k: (int(k[0][1:]), k[1])):
+        if key not in verdicts:
+            unverified.append({"block": key[0], "segment": key[1], "reason": "no verdict"})
+    return {
+        "segments_checked": checked,
+        "violations": dirty,
+        "unverified": unverified,
+        "clean": not dirty and not unverified,
+    }

@@ -1,93 +1,74 @@
 ---
 name: pinnforge-quickstart
-description: The fast path from zero to a running PINNForge experiment — what PINNForge is and when to reach for it, installing the CLI, picking a coding-agent harness, and the task/run layout. Use this whenever the user asks "what is pinnforge", "should I use pinnforge for this", wants to install or set it up, hits a "command not found" for pinnforge, or says "use pinnforge to solve this PDE" and needs the end-to-end path from install to a launched run. Hands off to `setting-up-harnesses` (which CLI drives the blocks), `creating-a-pinnforge-task` (task packages) and `running-pinnforge-blocks` (operating a run) for depth.
+description: The fast path from zero to a running PINNForge experiment — what PINNForge is and when to reach for it, installing the CLI, creating a workspace, the zero-token demo, choosing the agent, creating a task from a described PDE, and launching and watching a run. Use whenever the user asks "what is pinnforge", "should I use pinnforge for this", wants to install or set it up, hits "command not found" for pinnforge, or says "use pinnforge to solve this PDE" and needs the end-to-end path. Hands off to `setting-up-harnesses` (the agent that runs blocks), `creating-a-pinnforge-task` (tasks and references) and `running-pinnforge-blocks` (operating a run).
 ---
 
 # PINNForge quickstart
 
 **PINNForge** designs physics-informed neural networks by running autonomous
-coding agents against a fixed GPU budget. A **block** is one agent, one budget,
-and one written summary. Blocks run in series; knowledge compounds through the
-summaries, not through orchestrator state. The orchestrator is a plain Python
-process, so whether a block is finished is a question the filesystem answers and
-no model is asked to decide it.
+coding agents against a fixed GPU budget. A **block** is one agent, one budget
+and one written summary; blocks run in series and later blocks build on
+earlier summaries. Every candidate is scored by relative L2 error (rRMSE)
+against a reference solution, by a score service the agents cannot read.
 
-## When to reach for PINNForge
+## When to reach for it
 
-**Good fit**
-- A PDE with a **reference solution**, so a candidate can be scored (rRMSE, lower is better).
-- The work is **iterative search** over PINN design: architecture, loss weighting, sampling, optimiser schedule.
-- You have GPU time to spend and want it spent by an agent that reads the literature first.
+**Good fit:** a PDE where a better PINN design is worth GPU hours — you want
+architecture, sampling, loss weighting and optimiser choices searched by an
+agent that reads the literature first (it ships 130 paper notes).
 
-**Not a fit**
-- No reference to score against. The whole loop is built on a number.
-- A single forward solve. Use a classical solver.
-
-## How a run is shaped
-
-```
-you provide:   tasks/<name>/  =  problem.md + baseline.py + eval.py + data
-                                 (+ private/ holding the answers)
-pinnforge:     measures b00 (the baseline as-is) as the control node
-each block:    read kb1 + earlier summaries -> write candidates -> eval.py
-               -> score service -> repeat until the budget is spent
-               -> write blocks/kb2/bNN.md
-```
-
-Everything a block does is inside `runs/<task>_<n>/`. That directory is
-self-contained: a frozen copy of the task, the rendered charter, per-block
-workspaces, the ledger and the logs.
+**Not a fit:** a single forward solve (use a classical solver), or a problem
+with no computable reference — scoring needs one. It does not have to exist
+yet: PINNForge builds one with a classical solver and checks it converged.
 
 ## Get running
 
-### 1. Install
-
 ```bash
-git clone git@github.com:JiangtaoShen/pinnforge.git && cd pinnforge
-uv sync
-pinnforge info          # resolved paths, tasks, runs
+curl -fsSL https://raw.githubusercontent.com/JiangtaoShen/pinnforge/main/install.sh | sh
+pinnforge init ~/pf && cd ~/pf     # workspace, which GPUs to use, pinned JAX environment
+pinnforge demo                     # a full run in minutes, scripted agent, no API key
+pinnforge setup                    # choose and prove the coding agent that runs blocks
+pinnforge doctor                   # every prerequisite, with the fix for anything missing
 ```
 
-### 2. Pick a harness and prove it answers
+On a machine with several GPUs, `init` lists them with what is running on each
+and asks which this workspace may use — one, several, all, or none. That is the
+operator's call: ask the user rather than choosing, and pass it as
+`--gpus 1` / `--gpus 0,1` / `--gpus all` / `--gpus none` when running `init`
+for them. `pinnforge setup gpus` changes it later.
 
-Blocks run on whichever coding-agent CLI is installed, driven headlessly. Each
-is installed and authenticated separately.
+`pinnforge demo` measures the anchor, runs two blocks and opens the dashboard,
+so the operator sees the whole loop before spending anything.
 
-```bash
-pinnforge agents list
-pinnforge agents doctor --ping --model claude-opus-4-8
-```
+## A task from a described PDE
 
-`doctor` alone checks the CLI is on PATH. `--ping` spends one exchange proving
-the credentials, the provider config and the model id work too. Skip it and
-those fail at the first block instead, an hour in. Details and the per-harness
-troubleshooting matrix are in the `setting-up-harnesses` skill.
-
-### 3. Check the task is loadable
+The user's words are enough. Delegate to the `pinnforge-task-author` subagent
+when available; otherwise:
 
 ```bash
-pinnforge task list
-pinnforge task validate ldc     # 29 contract checks
-pinnforge task anchor ldc       # the b00 score every block must beat
+pinnforge task new heat2d --describe "2-D heat equation u_t = 0.01 Δu on [0,1]², t ∈ [0,1],
+  u = 0 on the boundary, u(x,y,0) = sin(πx) sin(πy); score u"      # no reference: one is built
+pinnforge task new ldc2 --describe @spec.md --reference ~/data/ldc_re1000.mat   # user's data
+pinnforge task status heat2d --follow
 ```
 
-No task yet? That is the `creating-a-pinnforge-task` skill.
+`creating-a-pinnforge-task` has the details (stages, the reference check,
+resuming).
 
-### 4. Launch
+## Run and watch
 
 ```bash
-pinnforge run start -t ldc -n 5
+pinnforge run start -t heat2d -n 3     # detaches: survives the terminal; opens the dashboard
+pinnforge ui                           # the live dashboard: scores, fields, agent activity
+pinnforge run status heat2d_1          # or attach / log / stop — see running-pinnforge-blocks
 ```
-
-Then `running-pinnforge-blocks` covers status, resume, reading scores, and the
-integrity audit.
 
 ## Two rules that matter more than they look
 
-**Pin an exact model id, never an alias.** `opus` meant one model for a year and
-another after. Two runs a generation apart both record "opus" and quietly stop
-being comparable.
+**Pin an exact model id, never an alias** — `setup` does this. `opus` meant one
+model for a year and another after; two runs a generation apart both record
+"opus" and quietly stop being comparable.
 
 **Never write into a live `runs/<id>/`.** It is a block's workspace, and the
-orchestrator hashes everything outside that workspace before each dispatch. An
+orchestrator hashes everything outside that workspace around each dispatch; an
 edit shows up as an integrity violation and taints the run.

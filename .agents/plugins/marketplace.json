@@ -1,0 +1,11 @@
+{
+  "name": "pinnforge-marketplace",
+  "owner": { "name": "JiangtaoShen", "url": "https://github.com/JiangtaoShen/pinnforge" },
+  "plugins": [
+    {
+      "name": "pinnforge",
+      "source": { "source": "git-subdir", "url": "https://github.com/JiangtaoShen/pinnforge.git", "path": "./plugin" },
+      "description": "Author and run PINNForge tasks from Codex: skills plus a session-start install check."
+    }
+  ]
+}

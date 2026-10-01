@@ -7,6 +7,8 @@ from typing import Any
 
 from pinnforge.runtime.base import AgentHandle, AgentUsage, clean_env, scan_jsonl_for, spawn
 
+BLOCK_SETTINGS = '{"enabledPlugins": {"pinnforge@pinnforge-marketplace": false}}'
+
 
 class ClaudeCodeRuntime:
     name = "claude_code"
@@ -60,6 +62,11 @@ class ClaudeCodeRuntime:
             # recording that it had changed. With no --mcp-config to pair it
             # with, this admits none of them and the surface is the CLI's own.
             "--strict-mcp-config",
+            # The same holds for the operator's PINNForge plugin: its skills
+            # and subagents are for driving the framework, not for being a
+            # block, so a block never loads them.
+            "--settings",
+            BLOCK_SETTINGS,
             "--output-format",
             "stream-json",
             "--verbose",

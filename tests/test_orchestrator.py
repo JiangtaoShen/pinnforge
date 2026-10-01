@@ -554,3 +554,226 @@ def test_a_readopted_block_is_not_reported_stalled_immediately(project, monkeypa
 
     stalls = [r for r in records if "quiet for" in r.getMessage()]
     assert not stalls, f"a freshly dispatched block must not read as stalled: {stalls}"
+
+
+# ─────────────── a closed block is not re-adopted, and counts as used ───────────────
+
+
+def test_a_short_block_is_not_readopted_by_the_next_pass(project):
+    """`short` and `failed` are verdicts; re-adopting them ate every later slot."""
+    run = layout.create_run(RunConfig(task="ldc", blocks=2))
+    _anchor(run)
+
+    def script(r, b, n):
+        if b == "b01":
+            _finish(r, b, wall=3346.0, score=0.29)  # stops just short, every time
+        else:
+            _finish(r, b, score=0.2)
+
+    rt = StubRuntime(script)
+    orch = _orch(run, rt)
+    assert orch.run_blocks(2) == ["b02"]
+    assert orch.state.blocks["b01"].status == "short"
+    assert [c["block_id"] for c in rt.calls] == ["b01", "b01", "b02"], (
+        "the second slot goes to a new block, not to a third round of b01"
+    )
+
+
+def test_a_resumed_run_does_not_readopt_a_failed_block(project):
+    run = layout.create_run(RunConfig(task="ldc", blocks=2))
+    _anchor(run)
+    _orch(run, StubRuntime(lambda r, b, n: None)).run_blocks(1)  # b01 produces nothing
+    _, _, state = layout.load_run(run.name)
+    assert state.blocks["b01"].status == "failed"
+
+    rt = StubRuntime(lambda r, b, n: _finish(r, b))
+    assert _orch(run, rt).run_blocks(1) == ["b02"]
+    assert [c["block_id"] for c in rt.calls] == ["b02"]
+
+
+def test_an_interrupted_block_is_still_readopted(project):
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    _anchor(run)
+    _partial(run, "b01")
+    state = RunState.load(paths.state_path(run))
+    from pinnforge.types import BlockState
+
+    state.blocks["b01"] = BlockState(block_id="b01", status="interrupted")
+    state.save(paths.state_path(run))
+    rt = StubRuntime(lambda r, b, n: _finish(r, b))
+    assert _orch(run, rt).run_blocks(1) == ["b01"]
+
+
+def test_resume_counts_short_and_failed_blocks_as_used(project):
+    from pinnforge.cli import run_cmd
+    from pinnforge.types import BlockState
+
+    run = layout.create_run(RunConfig(task="ldc", blocks=4))
+    _anchor(run)
+    _finish(run, "b01")
+    for b in ("b02", "b03"):
+        _partial(run, b)
+    state = RunState.load(paths.state_path(run))
+    state.blocks["b01"] = BlockState(block_id="b01", status="done")
+    state.blocks["b02"] = BlockState(block_id="b02", status="short")
+    state.blocks["b03"] = BlockState(block_id="b03", status="failed")
+    state.save(paths.state_path(run))
+    cfg = RunConfig.load(paths.config_path(run))
+    assert run_cmd._remaining(run, cfg, state) == 1, "only the fourth block is still owed"
+
+
+# ─────────────── integrity verdicts survive a resume ───────────────
+
+
+def test_a_resumed_block_never_overwrites_an_earlier_verdict(project, monkeypatch):
+    """Segments restarted at 0 in every `_run_one`, so a resume wrote b01.0 again."""
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    _anchor(run)
+
+    def tamper(r, b, n):
+        (r / "blocks" / "b00" / "evals.jsonl").write_text("{}\n", encoding="utf-8")
+        _partial(r, b)
+
+    orch = _orch(run, StubRuntime(tamper))
+    real_await = Orchestrator._await
+    monkeypatch.setattr(Orchestrator, "_await",
+                        lambda self, h, b: (_ for _ in ()).throw(KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        orch.run_blocks(1)
+    monkeypatch.setattr(Orchestrator, "_await", real_await)
+
+    rt = StubRuntime(lambda r, b, n: _finish(r, b))
+    orch2 = _orch(run, rt)
+    assert orch2.run_blocks(1) == ["b01"], "the interrupted block is re-adopted and finishes"
+
+    names = sorted(p.name for p in (run / ".integrity").glob("b01.*"))
+    assert names == ["b01.0.json", "b01.0.result.json", "b01.1.json", "b01.1.result.json"]
+    first = json.loads((run / ".integrity" / "b01.0.result.json").read_text(encoding="utf-8"))
+    assert first["clean"] is False, "the violation of the first dispatch is still on record"
+    report = integrity.audit(run)
+    assert report["segments_checked"] == 2 and not report["clean"]
+    bs = orch2.state.blocks["b01"]
+    assert bs.status == "done"
+    assert bs.exit_reason.startswith("integrity:"), (
+        f"a later clean segment must not wash out the earlier verdict: {bs.exit_reason!r}"
+    )
+
+
+def test_the_bookkeeping_after_a_segment_cannot_be_torn(project, monkeypatch):
+    """A stop signal between booking the usage and saving the verdict split the two."""
+    from pinnforge.run import lifecycle
+
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    _anchor(run)
+    depths = {}
+    real_record, real_check = Orchestrator._record_segment, Orchestrator._check_integrity
+
+    def record(self, *a):
+        depths["usage"] = lifecycle._sig["depth"]
+        return real_record(self, *a)
+
+    def check(self, *a):
+        depths["verdict"] = lifecycle._sig["depth"]
+        return real_check(self, *a)
+
+    monkeypatch.setattr(Orchestrator, "_record_segment", record)
+    monkeypatch.setattr(Orchestrator, "_check_integrity", check)
+    _orch(run, StubRuntime(lambda r, b, n: _finish(r, b))).run_blocks(1)
+    assert depths["usage"] > 0 and depths["verdict"] > 0
+
+
+# ─────────────── the environment: CPU pools, the scorer, stray processes ───────────────
+
+
+def test_a_cpu_run_is_healthy_whatever_nvidia_smi_says(monkeypatch):
+    from pinnforge import orchestrator
+
+    monkeypatch.setattr(orchestrator.shutil, "which", lambda name: "/usr/bin/nvidia-smi")
+
+    class Broken:
+        returncode, stdout = 9, ""
+
+    monkeypatch.setattr(orchestrator.subprocess, "run", lambda *a, **kw: Broken())
+    assert orchestrator.gpu_healthy([]), "an empty pool has no card to lose"
+    assert not orchestrator.gpu_healthy([0])
+
+
+def test_unanswered_evaluations_are_not_evaluations(project):
+    cfg = RunConfig(task="ldc")
+    cfg.sandbox.wall_budget_s = 1000
+    run = layout.create_run(cfg)
+    d = run / "blocks" / "b01"
+    d.mkdir(parents=True)
+    rec = {"smoke": False, "diag": False, "wall_s": 950, "rRMSE": None,
+           "error": "scorer unavailable — start `pinnforge scored` (…)"}
+    (d / "evals.jsonl").write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    (run / "blocks" / "kb2" / "b01.md").write_text("# b01 — x\n", encoding="utf-8")
+    v = verify_block(run, "b01", cfg, 100.0)
+    assert v.scored_evals == 0 and not v.done, "nothing was scored, so the block is not done"
+
+
+def test_a_dead_scorer_stops_the_run_before_a_dispatch(project):
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    _anchor(run)
+    rt = StubRuntime(lambda r, b, n: _finish(r, b))
+    orch = _orch(run, rt)
+
+    class Dead:
+        def ensure(self):
+            return False
+
+    orch.scorer = Dead()
+    with pytest.raises(EnvironmentFailure, match="score service"):
+        orch.run_blocks(1)
+    assert rt.calls == []
+
+
+def test_the_scorer_knows_which_block_is_dispatched(project):
+    from pinnforge import scoring
+
+    run = layout.create_run(RunConfig(task="ldc", blocks=1))
+    _anchor(run)
+    dispatch = scoring.Dispatch()
+    seen, ended = [], []
+
+    def script(r, b, n):
+        seen.append(dispatch.block)
+        _finish(r, b)
+
+    orch = _orch(run, StubRuntime(script))
+    orch.dispatch = dispatch
+    orch.on_segment_end = lambda: ended.append(dispatch.block)
+    orch.run_blocks(1)
+    assert seen == ["b01"], "requests from b01 are the ones answered while it runs"
+    assert ended == [None] and dispatch.block is None, "and none once it has stopped"
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="needs /proc")
+def test_what_an_agent_leaves_running_is_stopped_when_it_exits(tmp_path):
+    """A background eval kept writing into the previous block after its agent exited."""
+    import time as _time
+
+    from pinnforge.runtime.base import spawn
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.cfg = RunConfig(task="t")
+    orch.cfg.poll_seconds = 1
+    orch.run = tmp_path
+    pidfile = tmp_path / "bg.pid"
+    handle = spawn(["sh", "-c", f"sleep 60 & echo $! > {pidfile}; exit 0"],
+                   cwd=tmp_path, env=dict(os.environ), log_path=tmp_path / "a.log",
+                   block_id="b01")
+    orch._await(handle, "b01")
+    bg = int(pidfile.read_text())
+
+    def running(pid):
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        except (OSError, IndexError):
+            return False
+        return state not in ("Z", "X")
+
+    deadline = _time.time() + 5
+    while running(bg) and _time.time() < deadline:
+        _time.sleep(0.05)
+    assert not running(bg), "the agent's stray background job outlived it"

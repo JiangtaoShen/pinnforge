@@ -24,7 +24,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from pinnforge import paths
-from pinnforge.config import RunConfig
+from pinnforge.config import DEFAULT_WALL_BUDGET, RunConfig
+from pinnforge.task import contract
 
 # The dispatch prompt. Held constant across every runtime — a block that got
 # different instructions on a different harness would not be the same block.
@@ -56,23 +57,32 @@ SUMMARY_REPAIR_PROMPT = (
 
 def render_charter(cfg: RunConfig, root: Path | None = None) -> str:
     template = paths.charter_template(root).read_text(encoding="utf-8")
+    cpu_only = not cfg.sandbox.gpus
     gpus = cfg.sandbox.gpus or [0]
     flags = " / ".join(f"`--gpu {g}`" for g in gpus)
     count = {1: "one", 2: "two"}.get(len(gpus), str(len(gpus)))
+    if cpu_only:
+        # No card is visible: eval.py still takes `--gpu 0`, which then names
+        # the one CPU slot its lock serialises on.
+        count, flags = "none — CPU only", "`--gpu 0` names the CPU slot"
     if len(gpus) == 2:
         subject = "both GPUs"
     elif len(gpus) > 2:
         subject = f"all {len(gpus)} GPUs"
     else:
-        subject = "the GPU"
+        subject = "the CPU" if cpu_only else "the GPU"
     if len(gpus) > 1:
         joined = " & ".join(f"… --gpu {g}" for g in gpus)
         parallel = f"{subject} only within one blocking command\n  (`{joined} & wait`)"
     else:
         parallel = f"{subject} used by one blocking command at a time"
+    budget = cfg.sandbox.wall_budget_s
+    if budget is None:
+        budget = contract.wall_budget(paths.tasks_dir(root) / cfg.task) if root else None
+    budget = budget or DEFAULT_WALL_BUDGET
 
     return (
-        template.replace("{{WALL_BUDGET}}", f"{cfg.sandbox.wall_budget_s:.0f}")
+        template.replace("{{WALL_BUDGET}}", f"{budget:.0f}")
         .replace("{{FIRST_GPU}}", str(gpus[0]))
         .replace("{{GPU_COUNT}}", count)
         .replace("{{GPU_FLAGS}}", flags)

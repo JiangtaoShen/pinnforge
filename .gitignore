@@ -32,3 +32,13 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+
+# Local quarantine copies of the corpus are never part of the repository or
+# the package; `pinnforge/kb1/` is the corpus that ships.
+pinnforge/_QUARANTINE*/
+
+# Workspace-internal state: locks, leases, score ledgers, solver envs, UI.
+.pinnforge/
+
+# Release archives built by scripts/build_examples.py
+/dist/

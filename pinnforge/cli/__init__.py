@@ -12,7 +12,19 @@ import os
 import sys
 
 from pinnforge import __version__, paths
-from pinnforge.cli import agents_cmd, kb_cmd, run_cmd, task_cmd
+from pinnforge.cli import (
+    agents_cmd,
+    chat_cmd,
+    demo_cmd,
+    doctor_cmd,
+    examples_cmd,
+    init_cmd,
+    kb_cmd,
+    run_cmd,
+    setup_cmd,
+    task_cmd,
+    ui_cmd,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,10 +36,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--root", default=None, help="project root (default: auto-detect)")
     sub = p.add_subparsers(dest="command", required=True)
 
+    init_cmd.register(sub)
+    setup_cmd.register(sub)
+    doctor_cmd.register(sub)
+    demo_cmd.register(sub)
     task_cmd.register(sub)
     run_cmd.register(sub)
+    examples_cmd.register(sub)
     kb_cmd.register(sub)
     agents_cmd.register(sub)
+    ui_cmd.register(sub)
+    chat_cmd.register(sub)
 
     info = sub.add_parser("info", help="show resolved paths and library contents")
     info.set_defaults(func=cmd_info)
@@ -46,7 +65,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scored.add_argument("--once", action="store_true", help="drain the queue and exit")
     scored.set_defaults(func=cmd_scored)
+    _hide_suppressed(p)
     return p
+
+
+def _hide_suppressed(parser: argparse.ArgumentParser) -> None:
+    """Keep `help=SUPPRESS` subcommands (`run _drive`) out of every help screen.
+
+    argparse lists a suppressed subcommand anyway — in the usage line's
+    `{a,b,...}` and as a `==SUPPRESS==` row — so each subcommand group whose
+    members hide is given a metavar naming only the visible ones, and the
+    hidden rows are dropped. The commands themselves still parse.
+    """
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        rows = action._choices_actions
+        shown = [a for a in rows if a.help != argparse.SUPPRESS]
+        if len(shown) != len(rows):
+            action._choices_actions = shown
+            action.metavar = "{" + ",".join(a.dest for a in shown) + "}"
+        for sub in set(action.choices.values()):
+            _hide_suppressed(sub)
 
 
 def cmd_scored(args) -> int:
@@ -60,7 +100,9 @@ def cmd_scored(args) -> int:
     if not run.is_dir():
         print(f"no run at {run}", file=sys.stderr)
         return 2
-    private = args.private or os.environ.get("FORGE_PRIVATE_DIR")
+    from pinnforge import private as private_home
+
+    private = args.private or private_home.configured(root)
     print(f"serving scores for {run}" + (f" (private data: {private})" if private else ""))
     try:
         scoring.serve(root, run, private_dir=private, once=args.once)
@@ -70,12 +112,26 @@ def cmd_scored(args) -> int:
 
 
 def cmd_info(args) -> int:
+    from pinnforge import bindings, gpus, settings, workspace
+
     root = paths.project_root()
-    print(f"root    {root}")
-    print(f"tasks   {paths.tasks_dir(root)}")
-    print(f"runs    {paths.runs_dir(root)}")
-    print(f"kb1     {paths.kb1_dir(root)}")
-    print(f"python  {paths.venv_python(root)}")
+    kind = "workspace" if paths.is_workspace(root) else "source checkout"
+    print(f"root     {root}  ({kind}, stack {workspace.stack_of(root) or '—'})")
+    print(f"tasks    {paths.tasks_dir(root)}")
+    print(f"runs     {paths.runs_dir(root)}")
+    print(f"kb1      {paths.kb1_dir(root)}")
+    try:
+        print(f"python   {paths.venv_python(root)}")
+    except FileNotFoundError as e:
+        print(f"python   — ({e})")
+    spec = settings.get(root, "sandbox.gpus", gpus.AUTO)
+    print(f"gpus     {gpus.describe(gpus.workspace_pool(root))}  "
+          f"(sandbox.gpus: {gpus.render(spec)})")
+    try:
+        agent = bindings.resolve(root)
+        print(f"agent    {agent.runtime} / {agent.model or 'default'}")
+    except (KeyError, ValueError) as e:
+        print(f"agent    — ({e})")
     print()
     from pinnforge.task import registry
 
@@ -86,10 +142,27 @@ def cmd_info(args) -> int:
     return 0
 
 
+# Commands that make or repair the environment, or print something static,
+# are not interrupted by the version banner.
+_NO_BANNER = {"init", "workspace", "completion", "setup", "ui", "chat"}
+
+
+def _banner(command: str) -> None:
+    if command in _NO_BANNER:
+        return
+    try:
+        root = paths.project_root()
+    except paths.ProjectNotFound:
+        return
+    if note := init_cmd.skew(root):
+        print(note, file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.root:
         os.environ["PINNFORGE_ROOT"] = args.root
+    _banner(args.command)
     try:
         return args.func(args)
     except KeyError as e:

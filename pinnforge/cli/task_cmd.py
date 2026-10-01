@@ -10,10 +10,10 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
-from pinnforge import paths, scoring
-from pinnforge.config import AgentConfig
+from pinnforge import gpus, paths, scoring
+from pinnforge.cli import task_new
 from pinnforge.run import anchor
-from pinnforge.task import contract, registry
+from pinnforge.task import authoring, contract, registry
 
 
 def cmd_list(args) -> int:
@@ -21,11 +21,15 @@ def cmd_list(args) -> int:
     if not tasks:
         print(f"no tasks in {paths.tasks_dir()}")
         return 0
-    print(f"{'task':<12} {'train s':>8} {'budget s':>9}  title")
+    print(f"{'task':<12} {'state':<10} {'train s':>8} {'budget s':>9}  title")
     for t in tasks:
         tt = f"{t.train_time_s:.0f}" if t.train_time_s else "—"
         wb = f"{t.wall_budget_s:.0f}" if t.wall_budget_s else "—"
-        print(f"{t.name:<12} {tt:>8} {wb:>9}  {t.title}")
+        st = authoring.status(t.path)
+        state = "ready" if st is None or st.get("finalized") else f"{st.get('stage')}…"
+        if st and st.get("status") == "failed":
+            state = f"failed@{st.get('stage')}"
+        print(f"{t.name:<12} {state:<10} {tt:>8} {wb:>9}  {t.title}")
     return 0
 
 
@@ -46,7 +50,7 @@ def cmd_validate(args) -> int:
     if not task_dir.is_dir():
         print(f"no such task: {args.name}")
         return 2
-    report = contract.validate(task_dir)
+    report = contract.validate(task_dir, reference=not args.no_reference)
     print(report.render())
     return 0 if report.ok else 1
 
@@ -72,25 +76,31 @@ def cmd_smoke(args) -> int:
     contract is that `eval.py` exits 0 whenever a record was *written*,
     failed runs included, so the exit code says nothing about success.
     """
-    with scratch_run(args.name) as run:
+    code, message = run_smoke(args.name)
+    print(message)
+    return code
+
+
+def run_smoke(name: str) -> tuple[int, str]:
+    """The smoke itself: (exit code, verdict)."""
+    root = paths.project_root()
+    with scratch_run(name) as run:
         block = run / "blocks" / "b00"
         block.mkdir(parents=True, exist_ok=True)
         shutil.copy2(run / "task" / "baseline.py", block / "b00_v01.py")
         env = os.environ.copy()
-        env["FORGE_TASK"] = args.name
-        with scoring.serving(paths.project_root(), run):
+        env["FORGE_TASK"] = name
+        with scoring.serving(root, run):
             proc = subprocess.run(
-                [str(paths.venv_python()), "task/eval.py", "blocks/b00/b00_v01.py", "--smoke"],
+                [str(paths.venv_python(root)), "task/eval.py", "blocks/b00/b00_v01.py",
+                 "--smoke"],
                 cwd=str(run),
                 text=True,
                 env=env,
                 check=False,  # the record is the verdict, not the exit status
             )
         records = _records(block / "evals.jsonl")
-
-    code, message = smoke_verdict(proc.returncode, records)
-    print(message)
-    return code
+    return smoke_verdict(proc.returncode, records)
 
 
 def smoke_verdict(returncode: int, records: list[dict]) -> tuple[int, str]:
@@ -134,7 +144,7 @@ def scratch_run(name: str):
 
 
 def cmd_anchor(args) -> int:
-    """Show, build or rebuild a task's b00 control node.
+    """Show, build, rebuild or rekey a task's b00 control node.
 
     The anchor is the score every later block must beat. `run start` builds
     it on demand, but a task is not finished until it has one — this makes
@@ -142,27 +152,40 @@ def cmd_anchor(args) -> int:
     task ready to load rather than ready to be measured later.
     """
     name = args.name
-    cache = anchor.cache_dir(name)
-    meta = cache / "meta.json"
+    root = paths.project_root()
+    cache = anchor.cache_dir(name, root)
+    task_dir = paths.tasks_dir(root) / name
+    gpu = _anchor_gpu(args)
+    hw = anchor.hardware(gpu)
+    meta = anchor.read_meta(name, root)
 
-    if meta.is_file() and not args.rebuild:
-        data = json.loads(meta.read_text(encoding="utf-8"))
-        print(f"{name}: anchor rRMSE {data['rRMSE']:.5g} (cached)")
-        stale = [
-            f
-            for f, want in data.get("fingerprint", {}).items()
-            if _md5(paths.tasks_dir() / name / f) != want
-        ]
-        if stale:
-            print(f"  STALE — {', '.join(stale)} changed since it was measured")
-            print(f"  rebuild with: pinnforge task anchor {name} --rebuild")
+    if args.rekey:
+        # A cache from before hardware classes were recorded is stamped with
+        # the class of the card this machine measures on — when it has one.
+        stamp = hw if gpu is not None and hw.get("platform") == "gpu" else None
+        with scratch_run(name) as run, scoring.serving(root, run):
+            result = anchor.rekey(run, name, root, hw=stamp)
+        if result.rRMSE is None:
+            print(f"{name}: cannot rekey — {result.detail}")
+            print(f"  measure it again with: pinnforge task anchor {name} --rebuild")
+            return 1
+        print(f"{name}: anchor rRMSE {result.rRMSE:.5g} — {result.detail}")
+        return 0
+
+    if meta is not None and not args.rebuild:
+        print(f"{name}: anchor rRMSE {meta['rRMSE']:.5g} (cached)")
+        if why := anchor.staleness(meta, task_dir, name, root, hw):
+            print(f"  STALE — {why}")
+            print(f"  carry it over with:  pinnforge task anchor {name} --rekey"
+                  "   (free, when only the evaluation's plumbing changed)")
+            print(f"  or measure again:    pinnforge task anchor {name} --rebuild")
             return 1
         print("  task/ matches the measured baseline")
         return 0
 
     # Before spending a GPU, look for a run that already measured this exact
     # package. Same guard, cheaper source.
-    if not args.rebuild and (found := anchor.harvest(name)) is not None:
+    if not args.rebuild and (found := anchor.harvest(name, root, hw)) is not None:
         print(f"{name}: anchor rRMSE {found.rRMSE:.5g} ({found.detail}) -> {cache}")
         return 0
 
@@ -175,13 +198,16 @@ def cmd_anchor(args) -> int:
         print(f"  measure it with: pinnforge task anchor {name} --measure")
         return 1
 
-    if args.rebuild and cache.is_dir():
-        shutil.rmtree(cache)
+    if args.rebuild:
+        anchor.clear(name, root)
     task = registry.get_task(name)
     est = f"~{task.train_time_s:.0f} s of training" if task.train_time_s else "one training run"
-    print(f"measuring b00 for {name} on gpu {args.gpu} ({est})…")
-    with scratch_run(name) as run, scoring.serving(paths.project_root(), run):
-        result = anchor.ensure(run, name, gpu=args.gpu)
+    where = f"gpu {gpu}" if gpu is not None else "the CPU"
+    print(f"measuring b00 for {name} on {where} ({est})…")
+    with scratch_run(name) as run, scoring.serving(root, run):
+        # --rebuild means a new measurement: with the cache just cleared,
+        # ensure() would otherwise harvest an old run's b00 and call it one.
+        result = anchor.ensure(run, name, gpu=gpu, hw=hw, rebuild=args.rebuild)
     if result.rRMSE is None:
         print(f"  failed: {result.detail}")
         return 1
@@ -189,10 +215,12 @@ def cmd_anchor(args) -> int:
     return 0
 
 
-def _md5(path: Path) -> str:
-    import hashlib
-
-    return hashlib.md5(path.read_bytes()).hexdigest() if path.is_file() else ""
+def _anchor_gpu(args) -> int | None:
+    """The card to measure on: as asked, else the first of the pool, else the CPU."""
+    if getattr(args, "gpu", None) is not None:
+        return int(args.gpu)
+    pool = gpus.workspace_pool(paths.project_root())
+    return pool[0] if pool else None
 
 
 def _records(path: Path) -> list[dict]:
@@ -203,65 +231,6 @@ def _records(path: Path) -> list[dict]:
         for ln in path.read_text(encoding="utf-8").splitlines()
         if ln.strip()
     ]
-
-
-def cmd_new(args) -> int:
-    from pinnforge import agents
-
-    # A task the run library has already frozen is not a new task. Authoring it
-    # again would produce a different definition and break comparability with
-    # the runs that exist, so re-use theirs instead — and skip the agent.
-    known = (paths.tasks_dir() / args.name / "problem.md").is_file()
-    if not known and (found := registry.recover_from_run(args.name)) is not None:
-        dest, run = found
-        print(f"{args.name} was run before — recovered its definition from {run.name}")
-        print(f"  -> {dest}  ({', '.join(sorted(p.name for p in dest.iterdir()))})")
-        print("  private/ is not in a run by design; supply the scoring truth before use")
-        return 0 if (dest / "private").is_dir() else 1
-
-    sources = Path(args.source).expanduser().resolve()
-    if not sources.exists():
-        print(f"no such source path: {sources}")
-        return 2
-    agent = AgentConfig(runtime=args.runtime, model=args.model or "")
-    print(f"authoring task {args.name!r} from {sources} using {agent.runtime}…")
-    result = agents.author_task(
-        args.name,
-        sources,
-        args.prompt or "",
-        agent=agent,
-        template_task=args.template,
-    )
-    print(f"agent exited {result.returncode} after {result.duration_s:.0f} s")
-    print(f"log: {result.log_path}")
-
-    # Authoring is not done when the files exist — it is done when the task
-    # loads. Each gate reads the previous one's evidence: the contract, then
-    # the scoring path end to end, then the anchor every later block beats.
-    report = contract.validate(paths.tasks_dir() / args.name)
-    print()
-    print(report.render())
-    if not report.ok:
-        return 1
-    if args.no_load:
-        print("\n--no-load: stopping after validation")
-        return 0
-
-    print()
-    if (rc := cmd_smoke(args)) != 0:
-        return rc
-    print()
-    return cmd_anchor(_anchor_args(args))
-
-
-class _anchor_args:
-    """Adapt `task new`'s namespace to what `cmd_anchor` reads."""
-
-    def __init__(self, args):
-        self.name = args.name
-        self.gpu = getattr(args, "gpu", 0)
-        self.measure = True
-        self.rebuild = True  # a task just authored has no anchor worth keeping
 
 
 def register(sub) -> None:
@@ -276,6 +245,8 @@ def register(sub) -> None:
 
     val = s.add_parser("validate", help="check a task against the contract")
     val.add_argument("name")
+    val.add_argument("--no-reference", action="store_true",
+                     help="check everything but the answers (while authoring)")
     val.set_defaults(func=cmd_validate)
 
     smoke = s.add_parser("smoke", help="free CPU dress rehearsal of a task's baseline")
@@ -288,18 +259,13 @@ def register(sub) -> None:
         "--measure", action="store_true", help="build it on a GPU when none is cached"
     )
     anc.add_argument("--rebuild", action="store_true", help="re-measure even if cached")
-    anc.add_argument("--gpu", type=int, default=0)
+    anc.add_argument(
+        "--rekey",
+        action="store_true",
+        help="carry a stale anchor over without a GPU: allowed when the baseline is "
+        "unchanged and re-scoring its cached params reproduces the score exactly",
+    )
+    anc.add_argument("--gpu", type=int, default=None, help="default: first GPU of the pool")
     anc.set_defaults(func=cmd_anchor)
 
-    new = s.add_parser("new", help="author a new task, then carry it to loadable")
-    new.add_argument("name")
-    new.add_argument("--source", required=True, help="directory of reference files")
-    new.add_argument("--prompt", default="", help="what the task should be")
-    new.add_argument("--template", default="ldc", help="task package to adapt (default: ldc)")
-    new.add_argument("--runtime", default="claude_code")
-    new.add_argument("--model", default="")
-    new.add_argument("--gpu", type=int, default=0, help="gpu for the anchor measurement")
-    new.add_argument(
-        "--no-load", action="store_true", help="stop after validation; skip smoke and anchor"
-    )
-    new.set_defaults(func=cmd_new)
+    task_new.register(s)

@@ -70,6 +70,19 @@ def test_two_gpu_wording_matches_the_original():
     assert "(`… --gpu 0 & … --gpu 1 & wait`)" in text
 
 
+def test_cpu_mode_wording():
+    """No visible GPU: the charter says so instead of naming a card that is not there."""
+    text = charter.render_charter(_cfg(gpus=[]))
+    assert "none — CPU only" in text
+    assert "`--gpu 0` names the CPU slot" in text
+    assert "& wait" not in text
+
+
+def test_an_unset_budget_renders_the_default():
+    text = charter.render_charter(_cfg(gpus=[0]))
+    assert "{{" not in text and "7200 s" in text
+
+
 def test_only_intended_lines_differ_from_the_original():
     """Everything except the two deliberately generalised lines is verbatim.
 

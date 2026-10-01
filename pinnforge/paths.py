@@ -31,22 +31,41 @@ class ProjectNotFound(FileNotFoundError):
     """
 
 
-def project_root(start: Path | None = None) -> Path:
-    """Locate the project root: the nearest ancestor holding `tasks/`.
+MARKER = "pinnforge.yaml"  # what makes a directory a workspace
+STATE_DIR = ".pinnforge"  # a workspace's internal state: locks, ledgers, UI
 
-    `PINNFORGE_ROOT` overrides the search, which is what lets a block agent
-    (whose cwd is a run root, not the project) still find the library.
+
+def project_root(start: Path | None = None) -> Path:
+    """Locate the workspace: the nearest ancestor holding `pinnforge.yaml`.
+
+    A source checkout with `tasks/` next to the `pinnforge/` package is
+    accepted too, as it was before workspaces had a marker. `PINNFORGE_ROOT`
+    overrides the search, which is what lets a block agent (whose cwd is a
+    run root, not the workspace) still find the library.
     """
     if env := os.environ.get("PINNFORGE_ROOT"):
         return Path(env).resolve()
     here = (start or Path.cwd()).resolve()
     for base in [here, *here.parents]:
+        if (base / MARKER).is_file():
+            return base
         if (base / "tasks").is_dir() and (base / "pinnforge").is_dir():
             return base
     raise ProjectNotFound(
-        f"no PINNForge project at {here} or any parent directory.\n"
-        "Run from inside a project, or point PINNFORGE_ROOT at one."
+        f"no PINNForge workspace at {here} or any parent directory.\n"
+        "Create one with `pinnforge init <dir>`, cd into one, or point PINNFORGE_ROOT at one."
     )
+
+
+def is_workspace(root: Path) -> bool:
+    """A marked workspace (as opposed to a bare source checkout)."""
+    return (Path(root) / MARKER).is_file()
+
+
+def state_dir(root: Path | None = None) -> Path:
+    d = (root or project_root()) / STATE_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def tasks_dir(root: Path | None = None) -> Path:
@@ -98,12 +117,20 @@ def charter_template(root: Path | None = None) -> Path:
 def venv_python(root: Path | None = None) -> Path:
     """Interpreter the task's `eval.py` runs under.
 
-    Falls back to the ambient interpreter when the project venv is absent so
-    that validation and tests work in a bare checkout.
+    A workspace without its environment is an error that names the fix: the
+    fallback — whatever interpreter this CLI runs under — is, for an installed
+    tool, one with no JAX in it, and every evaluation then fails at import
+    with a message that points at the candidate. A bare source checkout still
+    falls back, so validation and tests work there.
     """
-    cand = (root or project_root()) / ".venv" / "bin" / "python"
+    root = root or project_root()
+    cand = root / ".venv" / "bin" / "python"
     if cand.is_file():
         return cand
+    if is_workspace(root) and not os.environ.get("PINNFORGE_AMBIENT_PYTHON"):
+        raise FileNotFoundError(
+            f"workspace {root} has no .venv — create it with `pinnforge workspace sync`"
+        )
     import sys
 
     return Path(sys.executable)

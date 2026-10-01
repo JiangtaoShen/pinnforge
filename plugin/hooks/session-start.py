@@ -2,17 +2,19 @@
 """PINNForge plugin SessionStart hook.
 
 Two jobs, both cheap and dependency-free:
-  1. Detect whether the `pinnforge` CLI is installed and reachable on PATH.
+  1. Find the `pinnforge` CLI — on PATH, or in the environment of a workspace
+     at or above the current directory.
   2. Inject a small block of context so the agent knows PINNForge is available
-     and which skill to reach for (authoring vs. running vs. harness setup).
+     and which skill or subagent to reach for.
 
 Output contract (Claude Code / Codex SessionStart hook): print a JSON object on
-stdout with hookSpecificOutput.additionalContext. That string is added to the
-session context. The session is never blocked (exit 0 always).
+stdout with hookSpecificOutput.additionalContext. The session is never blocked
+(exit 0 always).
 
-This hook is operator-facing only. It must never run inside a block: blocks are
-started in a run directory by the orchestrator, with their own charter, and
-anything this injected there would change what a block is.
+This hook is operator-facing only. It must never speak inside an agent the
+framework itself started — a block (`PINNFORGE_RUN`), or an author, reference
+or ping agent (`PINNFORGE_ROLE`): anything it injected there would change what
+that agent is.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 
 def _version(path: str) -> str | None:
@@ -37,54 +40,75 @@ def _version(path: str) -> str | None:
     return None
 
 
-def _installed(version: str | None) -> str:
+def _find() -> tuple[str | None, Path | None]:
+    """The CLI, and the workspace we are in (if any)."""
+    workspace = None
+    here = Path.cwd().resolve()
+    for base in [here, *here.parents]:
+        if (base / "pinnforge.yaml").is_file():
+            workspace = base
+            break
+    on_path = shutil.which("pinnforge")
+    if on_path:
+        return on_path, workspace
+    if workspace is not None:
+        local = workspace / ".venv" / "bin" / "pinnforge"
+        if local.is_file():
+            return str(local), workspace
+    return None, workspace
+
+
+def _installed(path: str, version: str | None, workspace: Path | None) -> str:
     ver = f" ({version})" if version else ""
+    cmd = "pinnforge" if shutil.which("pinnforge") == path else path
+    where = (f"You are in the workspace `{workspace}`." if workspace
+             else "No workspace here yet — `pinnforge init <dir>` creates one.")
     return (
         f"# PINNForge is available\n\n"
-        f"The `pinnforge` CLI is installed{ver}. PINNForge runs autonomous coding "
-        f"agents as **blocks**: one agent, a fixed GPU-wall budget, one written "
-        f"summary, in series, with knowledge compounding through the summaries.\n\n"
-        f"When the user wants to **run or manage blocks** (`pinnforge run start / "
-        f"status / resume / log / show / audit`), use the `running-pinnforge-blocks` "
-        f"skill. When they want to **author a task** (`problem.md` + `baseline.py` + "
-        f"`eval.py`), use `creating-a-pinnforge-task`. For picking and authenticating "
-        f"a coding-agent CLI, use `setting-up-harnesses`. For what-it-is and the fast "
-        f"path from zero, use `pinnforge-quickstart`.\n\n"
-        f"Do not memorise flags: run `pinnforge --help` or `pinnforge <cmd> --help`, "
-        f"and let the skills drive the workflow.\n\n"
-        f"**Never edit a run directory while it is running.** `runs/<id>/` is a live "
-        f"block's workspace, and the orchestrator hashes it before every dispatch.\n"
+        f"The `{cmd}` CLI is installed{ver}. {where} PINNForge runs autonomous "
+        f"coding agents as **blocks** to design physics-informed neural networks; "
+        f"every candidate is scored by rRMSE against a reference solution.\n\n"
+        f"- **A PDE to solve** (\"use pinnforge on this equation\"): delegate to the "
+        f"`pinnforge-task-author` subagent if available, else the "
+        f"`creating-a-pinnforge-task` skill — `pinnforge task new`.\n"
+        f"- **Run / watch / stop** blocks: `running-pinnforge-blocks` — "
+        f"`run start`, `ui`, `run status`, `run stop`, `run resume`.\n"
+        f"- **A stuck or failing run**: the `pinnforge-run-doctor` subagent.\n"
+        f"- **Which agent/model runs blocks**: `setting-up-harnesses` — `pinnforge setup`.\n"
+        f"- **First time**: `pinnforge-quickstart` — `pinnforge demo`, `pinnforge doctor`.\n\n"
+        f"Do not memorise flags: `{cmd} <cmd> --help`. Never edit `runs/<id>/` while a "
+        f"run is live; never start a run (it spends GPU hours and credits) unless "
+        f"the user asked for one.\n"
     )
 
 
 def _missing() -> str:
     return (
         "# PINNForge CLI not found\n\n"
-        "The `pinnforge` CLI is not on PATH. If the user asks to author or run a "
-        "PINNForge task, install it first:\n\n"
+        "The `pinnforge` CLI is not installed. If the user wants PINNForge, install it:\n\n"
         "```bash\n"
-        "git clone git@github.com:JiangtaoShen/pinnforge.git && cd pinnforge\n"
-        "uv sync\n"
+        "curl -fsSL https://raw.githubusercontent.com/JiangtaoShen/pinnforge/main/install.sh | sh\n"
+        "pinnforge init ~/pf && cd ~/pf && pinnforge demo\n"
         "```\n\n"
-        "Then the `pinnforge-quickstart` skill covers the path from there to a "
-        "launched run.\n"
+        "The `pinnforge-quickstart` skill covers the path from there to a launched run.\n"
     )
 
 
 def main() -> int:
-    # A block agent must never receive operator context. The orchestrator sets
-    # PINNFORGE_RUN for every block process, so its presence means "this session
-    # is a block, stay out of it".
-    if os.environ.get("PINNFORGE_RUN"):
+    # An agent the framework started — a block, or an author, reference or
+    # ping agent — must never receive operator context.
+    if os.environ.get("PINNFORGE_RUN") or os.environ.get("PINNFORGE_ROLE"):
         return 0
-    path = shutil.which("pinnforge")
-    context = _installed(_version(path)) if path else _missing()
-    json.dump(
-        {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}},
-        sys.stdout,
-    )
+    path, workspace = _find()
+    context = _installed(path, _version(path), workspace) if path else _missing()
+    event = "SessionStart"
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": event,
+                                             "additionalContext": context}}))
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception:
+        sys.exit(0)  # a broken hook must never block a session

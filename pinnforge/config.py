@@ -14,10 +14,11 @@ from typing import Any
 
 import yaml
 
-# Defaults match the framework this one replaces: two A6000-class GPUs, one
-# 7200 s GPU-wall budget per block, blocks pinned to a single model.
+# A block's budget when neither the operator nor the task names one. The
+# pool is found, not assumed: `auto` resolves to the GPUs actually visible
+# (see pinnforge/gpus.py), so a one-card workstation gets a one-card run.
 DEFAULT_WALL_BUDGET = 7200.0
-DEFAULT_GPUS = (0, 1)
+DEFAULT_GPUS = "auto"
 DEFAULT_STALL_MINUTES = 30
 DEFAULT_POLL_SECONDS = 60
 
@@ -32,11 +33,14 @@ class SandboxConfig:
     whole process tree, since everything the agent spawns inherits it.
     """
 
-    gpus: list[int] = field(default_factory=lambda: list(DEFAULT_GPUS))
+    gpus: list[int] = field(default_factory=lambda: _pool(DEFAULT_GPUS))
     env: dict[str, str] = field(default_factory=dict)
     command_prefix: list[str] = field(default_factory=list)
-    # Passed to the block as FORGE_WALL_BUDGET; eval.py enforces it.
-    wall_budget_s: float = DEFAULT_WALL_BUDGET
+    # Passed to the block as FORGE_WALL_BUDGET; eval.py enforces it. None
+    # until a run is created: then it is whatever the operator asked for, or
+    # the task's declared budget. A sentinel rather than the default value,
+    # because an operator who explicitly asks for 7200 s must get 7200 s.
+    wall_budget_s: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -44,12 +48,19 @@ class SandboxConfig:
     @classmethod
     def from_dict(cls, d: dict[str, Any] | None) -> SandboxConfig:
         d = d or {}
+        budget = d.get("wall_budget_s")
         return cls(
-            gpus=[int(g) for g in d.get("gpus", DEFAULT_GPUS)],
+            gpus=_pool(d.get("gpus", DEFAULT_GPUS)),
             env={str(k): str(v) for k, v in (d.get("env") or {}).items()},
             command_prefix=[str(c) for c in (d.get("command_prefix") or [])],
-            wall_budget_s=float(d.get("wall_budget_s", DEFAULT_WALL_BUDGET)),
+            wall_budget_s=None if budget is None else float(budget),
         )
+
+
+def _pool(spec) -> list[int]:
+    from pinnforge import gpus
+
+    return gpus.resolve(spec)
 
 
 @dataclass
@@ -96,9 +107,12 @@ class RunConfig:
     # nudged; it is not killed, because a long GPU eval is legitimately quiet.
     stall_minutes: int = DEFAULT_STALL_MINUTES
     poll_seconds: int = DEFAULT_POLL_SECONDS
+    # The hardware class the pool resolved to when the run was created — what
+    # its anchor and its wall-clock-bounded evaluations were measured on.
+    hw: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "task": self.task,
             "blocks": self.blocks,
             "agent": self.agent.to_dict(),
@@ -106,6 +120,9 @@ class RunConfig:
             "stall_minutes": self.stall_minutes,
             "poll_seconds": self.poll_seconds,
         }
+        if self.hw:
+            out["hw"] = self.hw
+        return out
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> RunConfig:
@@ -116,6 +133,7 @@ class RunConfig:
             sandbox=SandboxConfig.from_dict(d.get("sandbox")),
             stall_minutes=int(d.get("stall_minutes", DEFAULT_STALL_MINUTES)),
             poll_seconds=int(d.get("poll_seconds", DEFAULT_POLL_SECONDS)),
+            hw=dict(d.get("hw") or {}),
         )
 
     def save(self, path: Path) -> None:

@@ -39,7 +39,6 @@ from pinnforge.types import EvalRecord
 # still means something if the cache is ever refreshed.
 REFERENCE = {
     "rRMSE": 0.9444145758929638,
-    "MSE": 0.04237408124788594,
     "step_count": 133357,
     "train_s": 145.5,
     "source": "PINNForge b00, 2026-07-21, ldc3200_4_0.01604",

@@ -37,6 +37,10 @@ class AgentHandle:
     log_path: Path
     session_id: str | None = None
     _log_file: Any = None
+    # The agent's process group, recorded when it is started: `os.getpgid`
+    # stops answering once the CLI has been reaped, and the group — a shell,
+    # `eval.py`, a stray background job — can outlive it.
+    pgid: int | None = None
 
     @property
     def alive(self) -> bool:
@@ -67,7 +71,9 @@ class AgentHandle:
             self._log_file = None
 
     def _pgid(self) -> int | None:
-        """The group id, captured before the child is reaped — after that it is gone."""
+        """The group id — as recorded at start, else asked before the child is reaped."""
+        if self.pgid is not None:
+            return self.pgid
         if self.process is None:
             return None
         try:
@@ -297,7 +303,12 @@ def spawn(
         text=True,
     )
     return AgentHandle(
-        block_id=block_id, process=proc, cwd=cwd, log_path=log_path, _log_file=log_file
+        block_id=block_id,
+        process=proc,
+        cwd=cwd,
+        log_path=log_path,
+        _log_file=log_file,
+        pgid=proc.pid,  # a new session's leader leads its group, so they share the number
     )
 
 

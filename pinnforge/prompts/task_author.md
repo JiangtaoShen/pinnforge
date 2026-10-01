@@ -1,14 +1,19 @@
 # Task author
 
-You are building one PINNForge **task package** at `{dest}` from the
-reference material at `{sources}`.
+You are building one PINNForge **task package** at `{dest}`.
 
-{instruction}
+## What the task is
+
+{intake}
+
+Reference material, if any: {sources}
 
 A task package is what a block agent is handed instead of a paper: it has to
 be complete, self-consistent, and stated the same way every other task is,
 because an agent that has solved one task should already know where to look
 in the next.
+
+{mode}
 
 ## What to produce
 
@@ -18,21 +23,39 @@ In `{dest}`:
 |---|---|
 | `problem.md` | the task definition — the only prose a block reads |
 | `baseline.py` | the root candidate: vanilla PINN, frozen header, `train` / `predict_fn` |
-| `eval.py` | the single evaluation tool: budget, GPU locks, logging, and both halves of the metric |
+| `eval.py` | the task's constants, grid handling and metric; the machinery is shared |
 | `eval_grid.csv` | **public** — the coordinates a candidate predicts at |
-| `private/ref_values.npy` | **private** — the answers at those same rows, same order |
 | any other data | **public** — geometry, level sets, initial conditions: whatever `baseline.py` reads |
 
-A package is not a fixed set of files. Ship as many public data files as the
-physics needs — a level set for a cut-out body, an initial-condition field, a
-collocation grid — and name them for what they are. Only two things are
-structural: the three contract files must exist, and the answers must sit
-under `private/`.
+You never write or read the answers. They live in `private/`, which a
+separate stage fills, and which neither you nor any block may open — and that
+holds for **every** task's `private/`, not just this one's: other tasks'
+answers are not reference material, and listing or reading them is out of
+bounds. Their package files (`problem.md`, `baseline.py`, `eval.py`,
+`eval_grid.csv`, their other data) are fine to learn from; their `.authoring/`
+records are not, and neither are the coding-agent session stores
+(`~/.claude/projects`, `~/.codex/sessions`, OpenCode's and Cursor's data
+directories), which hold other agents' transcripts. What your tool calls touch,
+and what they print, is audited afterwards; a package whose author reached for
+any `private/` — or searched for the answers by name — is discarded unread.
 
-Adapt `{template_task}` — an existing, valid package. Keep its structure,
+**The package states the problem, never its solution.** Not a closed-form or
+manufactured solution, not values of the solution, not where or how the
+reference was made — in no file, no comment, no data column, and not in your
+report either. If the task description contains an exact solution, use it
+only where the problem itself needs it (a source term, boundary or initial
+data) and never write the solution down. Do not derive one, and do not judge
+the baseline against one or against anything else: how good the baseline is
+gets measured by the framework, through the score service, after you finish.
+
+Write every file of the package in this session — the framework checks that
+they were written after you started, and a session that fails or runs out of
+time is not accepted, whatever it left behind.
+
+Adapt the template at `{template_task}` — a valid package. Keep its structure,
 wording and machinery; change only what the new problem genuinely requires.
 Everything that can stay identical stays identical. Do not write these files
-from scratch, and never weaken the contract to fit the source material.
+from scratch, and never weaken the contract to fit the problem.
 
 ## `problem.md` — shape is fixed
 
@@ -62,12 +85,9 @@ Rules that the validator enforces:
   terse and factual — one formula, interval or sentence each. No citations,
   no provenance, no commentary on difficulty.
 
-Write for a solver, not a reader. Anything a block cannot act on — how the
-reference was generated, why the domain was sized that way, what you tried —
-belongs in your report, not in `problem.md`. The exception is a measured
-**error floor**: if the reference carries its own discretisation error, say
-so and give the number, because a block that does not know it will spend its
-budget fitting noise.
+Write for a solver, not a reader. Anything a block cannot act on — why the
+domain was sized that way, what you tried — belongs in your final report, not
+in `problem.md`.
 
 ## `baseline.py` — vanilla, and honest about it
 
@@ -81,45 +101,42 @@ Preserve exactly: the frozen `PDE CONSTANTS` header block, the
 `FORGE_EVAL_TOKEN` eval gate, the wall-deadline `train()` loop, the
 `train(rng, eval_callback=None) -> (params, step_count)` and
 `predict_fn(params, X) -> dict` signatures, and the absence of any RNG in
-the dataset path (every descendant must see identical points).
+the dataset path (every descendant must see identical points). Choose
+`TRAIN_TIME` so a vanilla run makes real progress — typically 60–300 s.
 
-## `eval.py` — machinery untouched, metric split in two
+## `eval.py` — the task's own half
 
-Start from the template's `eval.py` and keep the budget accounting, GPU
-locking, worker subprocess and logging **byte-identical**. Change only the
-two halves of the metric, the frozen-header literal, and the wall constants.
-`TRAIN_TIME_LITERAL` and `SMOKE_TRAIN_TIME` must be the same length, or the
-smoke substitution corrupts the line.
+The template's `eval.py` keeps only what is the task's own and hands the rest
+(budget, GPU locks, workers, the score queue) to the shared machinery with
 
-The metric is split because the process that executes candidate code must
-not be the process that holds the answers:
+    if __name__ == "__main__":
+        import _forgekit
+        raise SystemExit(_forgekit.main(globals()))
 
-* **`worker_eval` (agent side)** — execs the candidate, predicts on
-  `eval_grid.csv`, writes the predicted fields to a `.npz`, and calls
-  `_submit()`. It must never open the reference.
-* **`score_predictions(fields, ref_dir)` (service side)** — loads
-  `ref_values.npy` from `ref_dir`, derives the scored quantity, returns
-  `{"rRMSE", "MSE"}`. Pure numpy, no candidate code, no jax.
+Keep that tail and the module layout. Set, for the new problem:
 
-Any masking or windowing must be computable **from the public grid alone**,
-so put whatever the mask needs into `eval_grid.csv` (a level-set column, a
-region flag) and apply the identical mask on both sides. If the metric is a
-derived quantity — a velocity magnitude, an energy — derive it in
-`score_predictions`, and have the agent side predict only the raw fields.
+* `TRAIN_TIME_LITERAL` / `SMOKE_TRAIN_TIME` — the frozen-header literal and a
+  **same-length** smoke replacement (a few seconds);
+* `TRAIN_WALL_S` (= `TRAIN_TIME`), `SMOKE_WALL_S`, `EVAL_WALL_S` (keep it at
+  least 120), and the `FORGE_WALL_BUDGET` default in `BUDGET` — the GPU seconds
+  a block gets, typically 10–20 full evaluations' worth;
+* `INPUT_COLUMNS` — how many leading `eval_grid.csv` columns `predict_fn` is
+  handed; `FIELDS` — the fields a candidate predicts and files for scoring;
+* `REF_COLUMNS` — the columns of `ref_values.npy`, in order (the reference
+  stage produces exactly these);
+* `predict_rows(grid)`, only if some grid rows are not scored (points inside a
+  body, a window): return a boolean mask computed from the public grid alone;
+* `EXTRA_ENV`, only if candidates need extra environment (rare);
+* `score_predictions(fields, ref_dir)` — the service-side metric: load
+  `ref_values.npy` from `ref_dir`, derive the scored quantity, return
+  `{"rRMSE": value}` — that one number is all the score service ever passes
+  on, so compute nothing else, and on bad input return `{"error": "..."}`
+  without describing the reference. Pure numpy; no candidate code, no jax.
 
-## Splitting the reference
-
-Take the field you generated, and cut it column-wise:
-
-* coordinates, plus anything a public mask needs → `eval_grid.csv`
-* the values being scored → `ref_values.npy`, same rows, same order
-
-The grid and every other public file sit in the task directory; the values go
-in `private/`. The installer copies files into a run and never subdirectories,
-so what is secret is decided by *where it sits*, not by what it is called — a
-task whose answers are named something unexpected still cannot leak them. A
-private deployment moves them further still, to a directory owned by another
-user.
+Any mask must be computable **from the public grid alone** and applied
+identically on both sides. If the metric is a derived quantity — a velocity
+magnitude, an energy — derive it in `score_predictions` and have candidates
+predict only the raw fields.
 
 ## Verify before you finish
 
@@ -127,20 +144,13 @@ Run the validator and iterate until it is clean:
 
     {validate_cmd}
 
-Then prove the package runs end to end with the free CPU smoke path — this
-costs no GPU budget and catches contract, shape and NaN bugs:
-
-    {smoke_cmd}
-
-Beyond the validator, check the things it cannot: that the reference field
-actually satisfies the boundary conditions `problem.md` declares, and what a
-trivial predictor (a constant field) scores under your metric. A task whose
-baseline cannot beat a constant is worth knowing about before a run starts,
-not after.
+(The answers are filled in by a later stage, so this checks everything but
+them.) Then read your three files once more against the task description:
+the same equation, constants, domain, conditions and scored field everywhere.
 
 ## Report
 
-Finish with a short report: the equation and domain you settled on, where
-the reference data came from, the measured error floor if any, what a
-constant-field predictor scores, and anything about the package a future
-reader would otherwise have to rediscover.
+Finish with a short report: the equation and domain you settled on, the grid
+you chose and why (resolution, extent, any mask), the metric, and anything a
+future reader would otherwise have to rediscover — about the problem, never
+about its solution. The report is public.

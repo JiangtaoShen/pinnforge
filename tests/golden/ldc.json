@@ -1,0 +1,116 @@
+{
+  "gpu": {
+    "error": false,
+    "eval": {
+      "argv": [
+        "<RUN>/task/eval.py",
+        "--worker-eval",
+        "<RUN>/blocks/b01/b01_dump.py",
+        "<TMP>/params.pkl"
+      ],
+      "cwd": "<RUN>",
+      "env": {
+        "FORGE_BLOCK": "b01",
+        "FORGE_CANDIDATE": "blocks/b01/b01_dump.py",
+        "FORGE_RUN_ID": "ldc_0",
+        "FORGE_SEED": "0",
+        "FORGE_SMOKE": "0",
+        "FORGE_TASK": "ldc",
+        "FORGE_WALL_BUDGET": "3600",
+        "JAX_PLATFORMS": "cpu"
+      },
+      "path0": "<RUN>/task"
+    },
+    "rRMSE": 0.979392901382765,
+    "record_keys": [
+      "ts",
+      "block",
+      "candidate",
+      "seed",
+      "gpu",
+      "smoke",
+      "rRMSE",
+      "step_count",
+      "train_s",
+      "wall_s",
+      "params",
+      "error",
+      "wall_budget"
+    ],
+    "train": {
+      "argv": [
+        "<RUN>/task/eval.py",
+        "--worker-train",
+        "<RUN>/blocks/b01/b01_dump.py",
+        "0",
+        "<TMP>/params.pkl"
+      ],
+      "cwd": "<RUN>",
+      "env": {
+        "CUDA_VISIBLE_DEVICES": "0",
+        "FORGE_EVAL_TOKEN": "task/eval.py",
+        "FORGE_TASK": "ldc",
+        "FORGE_WALL_BUDGET": "3600",
+        "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+      },
+      "path0": "<RUN>/task"
+    }
+  },
+  "smoke": {
+    "error": false,
+    "eval": {
+      "argv": [
+        "<RUN>/task/eval.py",
+        "--worker-eval",
+        "<RUN>/blocks/b01/b01_dump.py",
+        "<TMP>/params.pkl"
+      ],
+      "cwd": "<RUN>",
+      "env": {
+        "FORGE_BLOCK": "b01",
+        "FORGE_CANDIDATE": "blocks/b01/b01_dump.py",
+        "FORGE_RUN_ID": "ldc_0",
+        "FORGE_SEED": "0",
+        "FORGE_SMOKE": "1",
+        "FORGE_TASK": "ldc",
+        "FORGE_WALL_BUDGET": "3600",
+        "JAX_PLATFORMS": "cpu"
+      },
+      "path0": "<RUN>/task"
+    },
+    "rRMSE": 0.979392901382765,
+    "record_keys": [
+      "ts",
+      "block",
+      "candidate",
+      "seed",
+      "gpu",
+      "smoke",
+      "rRMSE",
+      "step_count",
+      "train_s",
+      "wall_s",
+      "params",
+      "error",
+      "wall_budget"
+    ],
+    "train": {
+      "argv": [
+        "<RUN>/task/eval.py",
+        "--worker-train",
+        "<TMP>/candidate_smoke.py",
+        "0",
+        "<TMP>/params.pkl"
+      ],
+      "cwd": "<RUN>",
+      "env": {
+        "FORGE_EVAL_TOKEN": "task/eval.py",
+        "FORGE_TASK": "ldc",
+        "FORGE_WALL_BUDGET": "3600",
+        "JAX_PLATFORMS": "cpu",
+        "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+      },
+      "path0": "<RUN>/task"
+    }
+  }
+}

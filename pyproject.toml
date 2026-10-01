@@ -1,18 +1,38 @@
 [project]
 name = "pinnforge"
-version = "0.1.0"
+version = "0.2.0"
 description = "PINNForge — knowledge-centric multi-agent system for autonomous PINN design"
-requires-python = ">=3.11"
+# Below 3.14: the pinned numpy (2.1.1, shared with the stack) has no wheels for it.
+requires-python = ">=3.11,<3.14"
 dependencies = [
     # ── Orchestrator (harness-agnostic; no LLM SDK — agents are external CLIs) ──
+    # Deliberately light: this is what `uv tool install` (install.sh, from
+    # GitHub — the PyPI name `pinnforge` is an unrelated project) installs.
+    # The JAX stack belongs to each workspace's own environment, pinned in
+    # pinnforge/templates/stack.toml and written there by `pinnforge init`.
     "pyyaml>=6.0",
-    # ── Core PINN stack (frozen; every task's problem.md documents these pins) ──
+    # The score service computes rRMSE in this process; pinned to the
+    # stack's numpy so a score is the same number whichever side computes it.
+    "numpy==2.1.1",
+]
+
+[project.scripts]
+pinnforge = "pinnforge.cli:main"
+
+# The development environment of this checkout: the same frozen stack a
+# workspace gets (pinnforge/templates/stack.toml — tests/test_workspace.py
+# keeps them equal), installed by a plain `uv sync`.
+[dependency-groups]
+# ruff is bounded, not floored: its default rule set widens between minor
+# releases, and an unbounded floor is how `ruff check .` went from clean to 71
+# findings without a line of this repo changing.
+dev = ["pytest>=8.0", "ruff>=0.16,<0.17"]
+stack = [
     "jax[cuda12]==0.4.33",
     "flax==0.9.0",
     "optax==0.2.3",
     "numpy==2.1.1",
     "scipy==1.17.1",
-    # ── JAX-ecosystem extras (blocks may `uv add` more; core pins above stay frozen) ──
     "jaxopt==0.8.5",
     "evosax==0.1.6",
     "ml_collections==1.1.0",
@@ -21,14 +41,8 @@ dependencies = [
     "soap-jax @ git+https://github.com/haydn-jones/SOAP_JAX@ddddc25724dfd629b0cd01584eca1e32ea8ac4de",
 ]
 
-[project.optional-dependencies]
-# ruff is bounded, not floored: its default rule set widens between minor
-# releases, and an unbounded floor is how `ruff check .` went from clean to 71
-# findings without a line of this repo changing.
-dev = ["pytest>=8.0", "ruff>=0.16,<0.17"]
-
-[project.scripts]
-pinnforge = "pinnforge.cli:main"
+[tool.uv]
+default-groups = ["dev", "stack"]
 
 [build-system]
 requires = ["hatchling"]
@@ -36,6 +50,16 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pinnforge"]
+# A local quarantine copy of the corpus is never part of the package.
+exclude = ["pinnforge/_QUARANTINE*"]
+
+# The harness plugin ships inside the wheel too, so `pinnforge chat` can load
+# it with no separate install.
+[tool.hatch.build.targets.wheel.force-include]
+"plugin" = "pinnforge/_plugin"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/tasks", "/runs", "/logs", "/.pinnforge", "pinnforge/_QUARANTINE*"]
 
 # soap-jax is pinned to a git commit, like the framework it came from.
 [tool.hatch.metadata]
@@ -49,7 +73,7 @@ target-version = "py311"
 # whitespace-only lint fix marks every cached b00 STALE and costs a GPU
 # re-measurement of a number that is not reproducible to better than 0.4-17%.
 # They are held to the task contract instead: `pinnforge task validate`.
-extend-exclude = ["tasks"]
+extend-exclude = ["tasks", "pinnforge/examples"]
 
 [tool.ruff.lint]
 # Selected explicitly, never inherited. Ruff's default set widened between
@@ -63,3 +87,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `slow` tests run real evaluations (JAX, a GPU, the private references);
+# `uv run pytest -m slow` runs them.
+addopts = "-m 'not slow'"
+markers = ["slow: runs real evaluations — needs the JAX environment, a GPU and private/"]

@@ -16,6 +16,20 @@ from typing import Any
 
 # ──────────────────────────── evaluations ────────────────────────────
 
+# How a record says the score service never answered: the client's timeout
+# ("scorer unavailable — …") and a daemon that could not load the metric
+# ("scoring unavailable: …").
+SCORER_DOWN = ("scorer unavailable", "scoring unavailable")
+
+# The fields `task/eval.py` writes into a record, today. A record is copied
+# between runs only through this list (see `run/anchor.py`): the format used
+# to carry an `MSE` beside the `rRMSE`, and the two together with the public
+# grid's row count give away the reference's norm.
+RECORD_KEYS = (
+    "ts", "block", "candidate", "seed", "gpu", "smoke", "diag", "rRMSE",
+    "step_count", "train_s", "wall_s", "params", "error", "wall_budget",
+)
+
 
 @dataclass(frozen=True)
 class EvalRecord:
@@ -38,6 +52,22 @@ class EvalRecord:
     def scored(self) -> bool:
         """A real scoring run: not a free CPU smoke, not a diagnostic probe."""
         return not self.smoke and not self.diag
+
+    @property
+    def scorer_unavailable(self) -> bool:
+        """The run trained, but nobody scored it: the score service was down.
+
+        Such a record is the environment's failure, not an evaluation. Counted
+        as one, a block whose every request went unanswered — the score
+        thread had died — looked as though it had evaluated its candidates.
+        """
+        err = self.raw.get("error")
+        return isinstance(err, str) and err.startswith(SCORER_DOWN)
+
+    @property
+    def evaluation(self) -> bool:
+        """A scoring run the score service actually answered."""
+        return self.scored and not self.scorer_unavailable
 
     @classmethod
     def parse(cls, line: str) -> EvalRecord | None:
@@ -111,7 +141,7 @@ class BlockState:
     """Orchestrator's view of one block. Persisted in the run's ``state.json``."""
 
     block_id: str
-    status: str = "pending"  # pending | running | done | failed
+    status: str = "pending"  # pending | running | interrupted | done | short | failed
     runtime: str = ""
     model: str = ""  # the alias asked for, e.g. "opus"
     model_resolved: str = ""  # what it became, e.g. "claude-opus-5"
@@ -151,6 +181,11 @@ class RunState:
     created_at: str = ""
     updated_at: str = ""
     blocks: dict[str, BlockState] = field(default_factory=dict)
+    # How the run was started, so a resume starts it the same way: without
+    # these, `run resume` could not tell a run that skipped its anchor on
+    # purpose from one whose anchor measurement was interrupted.
+    no_anchor: bool = False
+    force: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -160,6 +195,8 @@ class RunState:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "blocks": {k: v.to_dict() for k, v in self.blocks.items()},
+            "no_anchor": self.no_anchor,
+            "force": self.force,
         }
 
     @classmethod
@@ -170,6 +207,8 @@ class RunState:
             status=d.get("status", "created"),
             created_at=d.get("created_at", ""),
             updated_at=d.get("updated_at", ""),
+            no_anchor=bool(d.get("no_anchor", False)),
+            force=bool(d.get("force", False)),
         )
         st.blocks = {k: BlockState.from_dict(v) for k, v in (d.get("blocks") or {}).items()}
         return st

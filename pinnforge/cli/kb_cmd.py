@@ -5,8 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from pinnforge import paths
-from pinnforge.config import AgentConfig
+from pinnforge import bindings, paths
 
 REQUIRED_SECTIONS = ("## TL;DR", "## Problem", "## Method", "## Results")
 
@@ -99,7 +98,9 @@ def cmd_add(args) -> int:
     if not sources.exists():
         print(f"no such source path: {sources}")
         return 2
-    agent = AgentConfig(runtime=args.runtime, model=args.model or "")
+    root = paths.project_root()
+    agent = bindings.resolve(root, agent=args.agent, runtime=args.runtime,
+                             model=args.model or None)
     before = len(_nodes(paths.kb1_dir()))
     print(f"distilling {sources} into kb1 using {agent.runtime}…")
     result = agents.distill_kb1(sources, args.prompt or "", agent=agent)
@@ -123,6 +124,7 @@ def register(sub) -> None:
     add = s.add_parser("add", help="distil papers into new nodes")
     add.add_argument("--source", required=True, help="directory of papers")
     add.add_argument("--prompt", default="")
-    add.add_argument("--runtime", default="claude_code")
+    add.add_argument("--agent", default=None, help="agent binding (default: the default binding)")
+    add.add_argument("--runtime", default=None)
     add.add_argument("--model", default="")
     add.set_defaults(func=cmd_add)

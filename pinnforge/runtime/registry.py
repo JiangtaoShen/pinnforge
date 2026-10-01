@@ -15,13 +15,19 @@ from pinnforge.runtime.builtin.claude_code import ClaudeCodeRuntime
 from pinnforge.runtime.builtin.codex import CodexRuntime
 from pinnforge.runtime.builtin.cursor_agent import CursorAgentRuntime
 from pinnforge.runtime.builtin.opencode import OpenCodeRuntime
+from pinnforge.runtime.builtin.replay import ReplayRuntime
 
 _RUNTIMES: dict[str, type] = {
     "claude_code": ClaudeCodeRuntime,
     "codex": CodexRuntime,
     "cursor_agent": CursorAgentRuntime,
     "opencode": OpenCodeRuntime,
+    "replay": ReplayRuntime,
 }
+
+# Runnable, but not an agent anyone installs: kept out of `agents list/doctor`
+# and the setup wizard. `replay` is the scripted demo (`pinnforge demo`).
+_HIDDEN = {"replay"}
 
 _ALIASES: dict[str, str] = {
     "claude": "claude_code",
@@ -101,7 +107,7 @@ def resolve_model(runtime: AgentRuntime, requested: str = "") -> str:
 
 
 def known_runtimes() -> list[str]:
-    return sorted(_RUNTIMES)
+    return sorted(k for k in _RUNTIMES if k not in _HIDDEN)
 
 
 def detect_available() -> list[dict[str, object]]:

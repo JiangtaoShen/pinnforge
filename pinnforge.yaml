@@ -1,0 +1,16 @@
+# This source checkout is itself a PINNForge workspace: tasks/ and runs/ live
+# here, and the environment is the repository's own `.venv` (`uv sync`).
+# Settings here apply to runs started from this directory; see
+# pinnforge/settings.py for the full list and their precedence.
+version: 1
+agent: null
+sandbox:
+  gpus: null            # null = the machine default (~/.config/pinnforge/config.yaml), else auto
+  wall_budget_s: null
+private_dir: null
+ui:
+  host: 127.0.0.1
+  port: 8765
+  autostart: true
+run:
+  detach: true

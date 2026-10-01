@@ -1,78 +1,94 @@
 ---
 name: creating-a-pinnforge-task
-description: Turn a PDE and a reference solution into a PINNForge task package — the three contract files (problem.md, baseline.py, eval.py), the public/private data split, and the three gates that decide whether the task actually loads (validate, smoke, anchor). Use whenever the user wants to add a new PDE case to PINNForge, asks why `task validate` fails, needs the b00 anchor measured or rebuilt, or asks what a task package has to contain.
+description: Turn a described PDE — with or without the user's own reference solution — into a PINNForge task that `run start` accepts. Covers `pinnforge task new` (interactive, `--describe`, `--reference`), the authoring stages (author agent, reference ingest or reference-builder agent, the framework's convergence check, validate, smoke, anchor), `task status` and `--resume`, what a task package contains, and the anchor cache (`--measure`, `--rebuild`, `--rekey`). Use whenever the user wants a new PDE case, has reference data to use, asks why authoring or `task validate` failed, or needs an anchor measured or carried over.
 ---
 
 # Creating a PINNForge task
 
-A task is not finished when its files exist. It is finished when it **loads**.
+A task is finished when it **loads** — when `run start` accepts it — not when
+its files exist. `task new` carries it all the way there.
+
+## One command
 
 ```bash
-pinnforge task new burgers --source ~/papers/burgers --prompt "Inviscid Burgers, IC -sin(pi x)"
+pinnforge task new                                   # asks, question by question
+pinnforge task new burgers --describe "u_t + u u_x = 0.01/π u_xx on [-1,1] × [0,1],
+  u(x,0) = -sin(πx), u(±1,t) = 0; score u"
+pinnforge task new cyl2 --describe @spec.md --reference https://…/cylinder.h5
+pinnforge task new … --detach                        # continue in the background
+pinnforge task status burgers --follow               # stages, live
 ```
 
-One command, because `task new` drives an authoring agent that adapts an
-existing package and then walks the three gates below. `--no-load` stops after
-validation. If the run library already knows the name, `task new` recovers the
-definition from the newest run instead of authoring a different one, which is
-what keeps new runs comparable with old ones.
+Useful flags: `--source <paper-or-notes>` (repeatable), `--agent <binding>`,
+`--ref-budget <minutes>` (default 240), `--ref-tol <x>` (default 1e-3),
+`--accept-reference "<reason>"`, `--no-load` (stop before the anchor).
 
-## The contract
+## The stages
 
-The framework touches a task only through this interface, so any package
-honouring it plugs in without framework changes.
+| stage | what happens |
+|---|---|
+| intake | the description is recorded (`tasks/<n>/.authoring/intake.md`) |
+| author | an agent writes `problem.md`, `baseline.py`, `eval.py` and the public grid, adapting the packaged demo task — it never sees the answers |
+| reference | **user data**: fetched (sha256 recorded) and ingested by an agent into `eval_grid.csv` + `private/ref_values.npy`. **none**: a reference-builder agent solves the PDE classically at ≥3 resolutions in its own environment |
+| reference_check | the framework — not the agent — scores each level against the next with the task's own metric, measures the convergence order, estimates the finest level's error, and re-runs the two coarsest levels |
+| validate | the task contract |
+| smoke | the scoring path end to end on the CPU, free |
+| anchor | b00 — the baseline measured once; every block must beat it |
+| finalize | released to `run start` |
 
-- **`problem.md`** — the task definition, and the only prose a block reads.
-  Seven fixed sections in a fixed order (Equation, Domain, Boundary conditions,
-  Initial condition, Scoring, Environment, Time budget), so an agent on its
-  second task already knows where to look. The intro paragraph and the
-  Environment body are verbatim across every task.
-- **`baseline.py`** — the root candidate. Defines the frozen `PDE CONSTANTS`
-  header and the `train(rng, eval_callback=None) -> (params, step_count)` /
-  `predict_fn(params, X) -> dict` contract every descendant keeps.
-- **`eval.py`** — the single evaluation tool:
-  `eval.py blocks/bNN/<file>.py [--gpu G] [--seed S] [--smoke | --diag]`.
-  Enforces `FORGE_WALL_BUDGET` across GPU runs (CPU `--smoke` is free), appends
-  one JSON record per run to `blocks/bNN/evals.jsonl` carrying `smoke`, `diag`,
-  `wall_s` and `rRMSE`, maintains `.budget`, saves params, and exits 0 whenever a
-  record was written. It must also define `score_predictions()` and submit
-  predictions rather than scoring inline.
-- **Public data** sits in the task directory and is copied into every run.
-  The **scoring truth** sits in `private/`, which is never copied: the installer
-  takes files only, so secrecy is where a file sits, not what it is named.
+With user data the reference stage runs *before* the author (the data fixes
+the grid). A failed stage keeps its note in `task status`; fix the cause and
+`pinnforge task new <name> --resume` continues from there — flags given with
+`--resume` (`--ref-budget`, `--ref-tol`, `--accept-reference`, `--agent`…)
+override the recorded ones, and `--redo STAGE` re-runs that stage and every
+later one (after a failed convergence check: `--resume --redo reference`).
+`pinnforge task reference <name> --check` re-runs the check.
 
-## The three gates
+Nothing of the reference reaches the package: no values, no closed form, no
+word of how it was made or how accurate it is (the estimate is shown to the
+operator, not written into `problem.md`). An exact solution the user knows is
+supplied as the reference — `--reference solution.py` (or `.txt`) holding the
+formula — and kept out of `--describe`, which the author agent reads. If the
+author reaches for any `private/`, the author stage fails and its package is
+moved to `logs/untrusted-package-N/` in the private home (the author must also
+finish cleanly and write the package in that session). If the ingest or
+reference agent writes anything outside `private/` — the package, `.authoring/`,
+`.anchor/` — it is moved to `logs/reference-guard-N/` and the stage fails.
+Their harness session transcripts are moved to `logs/harness-sessions/`
+(OpenCode and Cursor sessions are warned about instead). `levels.json` must
+declare a refinement `ratio` between 1.5 and 4; an ingested grid's header must
+be plain identifiers. `task new` honours `private_dir` / `FORGE_PRIVATE_DIR`.
 
-```bash
-pinnforge task validate burgers            # 29 contract checks
-pinnforge task smoke burgers               # free CPU dress rehearsal, end to end
-pinnforge task anchor burgers --measure    # the b00 score every block must beat
-```
+## What a package contains
 
-Each gate reads the previous one's evidence.
+- **`problem.md`** — the only prose a block reads; seven fixed sections.
+- **`baseline.py`** — the root candidate: a frozen `PDE CONSTANTS` header and
+  `train(rng, eval_callback=None) -> (params, step_count)` /
+  `predict_fn(params, X) -> dict`.
+- **`eval.py`** — the task's constants (`TRAIN_TIME_LITERAL`, walls, `BUDGET`),
+  its grid handling (`INPUT_COLUMNS`, `FIELDS`, `REF_COLUMNS`, optional
+  `predict_rows`) and its metric `score_predictions(fields, ref_dir)`. The
+  machinery (budget, GPU locks, workers, score queue) is shared and vendored
+  into each run as `task/_forgekit.py`.
+- **public data** (the grid, geometry, initial conditions) in the task
+  directory; **the answers** in `private/`, which never enters a run.
 
-The smoke passes only on a record carrying a score and no error. `eval.py` exits
-0 whenever a record was *written*, failed runs included, so the exit status
-proves nothing.
+`pinnforge task validate <name>` runs the contract checks by hand
+(`--no-reference` skips the answers, for a package still being authored).
 
-## The anchor is a measurement, not a block
+## The anchor
 
-`task anchor` on its own only reports: the cached score, and whether the
-contract files still fingerprint to what it was measured against.
+`pinnforge task anchor <name>` reports the cached b00 and whether it still
+applies — keyed on the package fingerprint (baseline, evaluation, public data),
+the reference, and the hardware class. **Judge staleness by that, never by the
+score**: the same task re-measured moves 0.4–17%, because training stops on a
+wall clock.
 
-**Judge staleness by that fingerprint, never by the score.** The same task
-re-measured at the same seed moves anywhere from 0.4% to 17%, because training
-stops on a wall clock and the run is not bit-deterministic. A score that moved
-does not mean the task changed; a fingerprint that moved does.
+- `--measure` builds one when none is cached; `--rebuild` replaces it;
+- `--rekey` carries a stale anchor over **without a GPU** when only the
+  evaluation's plumbing changed: allowed only if `baseline.py` is unchanged and
+  re-scoring the cached params reproduces the recorded rRMSE exactly.
 
-Nothing already paid for is paid for twice: `task anchor` and `run start`
-harvest a b00 from the newest run whose `task/` fingerprints to today's package
-before spending a GPU. `--measure` builds one when none is cached; `--rebuild`
-replaces a cached one.
-
-## Before you trust a new task
-
-Check what the anchor actually means. On some cases the trivial field is an
-exact solution of the residual, so b00 lands near 1.0 and beating it proves
-nothing; on others b00 is worse than a constant field. Compare b00 against the
-trivial predictors for the task before reading any block's gain as progress.
+Before trusting a new task, compare b00 with a trivial predictor: on some
+problems the zero field nearly satisfies the residual and beating b00 proves
+little.

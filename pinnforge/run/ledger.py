@@ -126,7 +126,8 @@ def block_rows(run: Path) -> list[dict]:
     for ev in sorted(paths.blocks_dir(run).glob("b*/evals.jsonl")):
         block = ev.parent.name
         recs = EvalRecord.read_all(ev)
-        scored = [r for r in recs if r.scored]
+        # an evaluation the score service never answered is not one (see verify_block)
+        scored = [r for r in recs if r.evaluation]
         u = usage.get(block, {})
         rows.append(
             {

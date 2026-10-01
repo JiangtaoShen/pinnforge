@@ -1,0 +1,27 @@
+# The frozen PINN stack every block trains on — the single source of truth.
+#
+# `pinnforge init` writes these pins into a workspace's own pyproject.toml,
+# and repeats the exact ones as uv constraints so a block's `uv add` cannot
+# move them. The repository's development environment pins the same set in
+# its `stack` dependency group; tests/test_workspace.py keeps the two equal.
+#
+# jaxlib 0.4.33 ships wheels for CPython 3.11 and 3.12 only.
+
+python = ">=3.11,<3.13"
+
+common = [
+    "flax==0.9.0",
+    "optax==0.2.3",
+    "numpy==2.1.1",
+    "scipy==1.17.1",
+    "jaxopt==0.8.5",
+    "evosax==0.1.6",
+    "ml_collections==1.1.0",
+    "jaxtyping==0.3.11",
+    "chex>=0.1.86",
+    "soap-jax @ git+https://github.com/haydn-jones/SOAP_JAX@ddddc25724dfd629b0cd01584eca1e32ea8ac4de",
+]
+
+# One of these joins `common`, chosen at `pinnforge init` (`--stack`).
+cuda12 = ["jax[cuda12]==0.4.33"]
+cpu = ["jax==0.4.33"]

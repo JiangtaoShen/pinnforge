@@ -8,7 +8,7 @@ single-task project the block charter was written against:
       run.yaml            frozen config
       state.json          orchestrator checkpoint
       task/               copy of tasks/ks/ — frozen for the run's lifetime
-      kb1/  -> ../../kb1  shared corpus, read-only to blocks
+      kb1/                copy of the corpus — frozen like task/
       .venv -> ../../.venv
       blocks/bNN/         per-block workspaces
       blocks/kb2/         block summaries
@@ -22,9 +22,10 @@ knowing anything about the multi-task layout above it.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
-from pinnforge import charter, paths
+from pinnforge import charter, gpus, paths
 from pinnforge.config import DEFAULT_WALL_BUDGET, RunConfig
 from pinnforge.task import contract, registry
 from pinnforge.types import RunState, utcnow
@@ -42,6 +43,21 @@ def _link(target: Path, link: Path) -> None:
     link.symlink_to(target, target_is_directory=True)
 
 
+def _copy_corpus(src: Path, dest: Path) -> None:
+    """A run reads the corpus it was created with.
+
+    It used to be a link to the one shared corpus, so `pinnforge kb1 add`
+    during a live run changed what a block was reading mid-block — and the
+    integrity check, which hashes the corpus around every dispatch, blamed
+    the block for it. A copy is a few megabytes and makes the run's corpus
+    as frozen as its task.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    if src.is_dir():
+        for f in sorted(src.glob("*.md")):
+            shutil.copy2(f, dest / f.name)
+
+
 def create_run(cfg: RunConfig, root: Path | None = None, run_id: str | None = None) -> Path:
     """Materialise a new run directory and return its path."""
     root = root or paths.project_root()
@@ -55,10 +71,13 @@ def create_run(cfg: RunConfig, root: Path | None = None, run_id: str | None = No
     # A task's eval.py declares the per-block budget it was tuned for. Adopt
     # it unless the caller asked for something else — the charter quotes this
     # number, so getting it from anywhere but the task is how the two drift.
-    if cfg.sandbox.wall_budget_s == DEFAULT_WALL_BUDGET:
-        declared = contract.wall_budget(task.path)
-        if declared:
-            cfg.sandbox.wall_budget_s = declared
+    if cfg.sandbox.wall_budget_s is None:
+        cfg.sandbox.wall_budget_s = contract.wall_budget(task.path) or DEFAULT_WALL_BUDGET
+    if not cfg.hw:
+        # The class of the card b00 is measured on — the pool's first. Over a
+        # mixed pool the whole pool's class is a list of names no anchor
+        # measured on one card could ever match, nor be filed under.
+        cfg.hw = gpus.hw_class(cfg.sandbox.gpus[:1])
 
     run_id = run_id or paths.next_run_id(cfg.task, root)
     run = paths.run_root(run_id, root)
@@ -71,7 +90,7 @@ def create_run(cfg: RunConfig, root: Path | None = None, run_id: str | None = No
     paths.logs_dir(run).mkdir()
 
     registry.install(task, run)
-    _link(paths.kb1_dir(root), run / "kb1")
+    _copy_corpus(paths.kb1_dir(root), run / "kb1")
     venv = root / ".venv"
     if venv.is_dir():
         _link(venv, run / ".venv")

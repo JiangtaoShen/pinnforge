@@ -15,6 +15,11 @@ from pathlib import Path
 from pinnforge import paths
 from pinnforge.task import contract
 
+# The shared evaluation machinery, and the name it is vendored under in a run.
+KIT_SOURCE = Path(__file__).resolve().parent / "evalkit.py"
+KIT_FILE = contract.KIT_MODULE + ".py"
+FINGERPRINT_SCHEMA = 2
+
 
 @dataclass(frozen=True)
 class TaskInfo:
@@ -92,6 +97,10 @@ def install(task: TaskInfo, run_root: Path) -> Path:
     for src in sorted(task.path.iterdir()):
         if src.is_file():
             shutil.copy2(src, dest / src.name)
+    # The shared evaluation machinery travels with the run, frozen and hashed
+    # like the rest of `task/`, so upgrading the tool cannot change how an
+    # existing run evaluates. Harmless for a task that does not use it.
+    shutil.copy2(KIT_SOURCE, dest / KIT_FILE)
     return dest
 
 
@@ -124,22 +133,84 @@ def recover_from_run(name: str, root: Path | None = None) -> tuple[Path, Path] |
     dest = (root or paths.project_root()) / "tasks" / name
     dest.mkdir(parents=True, exist_ok=True)
     for f in sorted(src.iterdir()):
-        if f.is_file():
+        # the vendored machinery belongs to the run, not to the package
+        if f.is_file() and f.name != KIT_FILE:
             shutil.copy2(f, dest / f.name)
     return dest, runs[0]
 
 
-def fingerprint(task_dir: Path) -> dict[str, str]:
-    """md5 of each contract file — what a cached b00 anchor is keyed on.
+def fingerprint_v1(task_dir: Path) -> dict[str, str]:
+    """md5 of each contract file — how anchors were keyed before schema 2.
 
-    Data files are deliberately excluded: they are large and are covered by
-    `eval.py`'s own reading of them, whereas a changed `baseline.py` means
-    cached params came from other code and a changed `eval.py` means the
-    cached score is on another metric.
+    Kept so an anchor cached under it is still recognised: a task whose three
+    files have not changed has not changed, whichever scheme measured it.
     """
     out = {}
     for name in contract.CONTRACT_FILES:
         p = task_dir / name
         if p.is_file():
             out[name] = hashlib.md5(p.read_bytes()).hexdigest()
+    return out
+
+
+def file_md5(path: Path) -> str:
+    h = hashlib.md5()
+    with path.open("rb") as fh:
+        while chunk := fh.read(1 << 20):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def fingerprint(task_dir: Path) -> dict:
+    """What a cached b00 anchor is keyed on: everything that decides its score.
+
+    * `baseline.py` — the params came from this code;
+    * `eval.py`, and the shared machinery when the task uses it — the score
+      is on this metric, produced by this evaluation;
+    * the public data files — the grid it was scored on, the geometry and
+      initial conditions it trained on.
+
+    `problem.md` is left out: it is prose a block reads, and b00 is measured
+    without an agent, so rewording it cannot move the number. Keying on it
+    used to mean a typo fix cost a GPU re-measurement.
+    """
+    if not (task_dir / "eval.py").is_file():
+        return {}
+    files = {}
+    for name in ("baseline.py", "eval.py"):
+        p = task_dir / name
+        if p.is_file():
+            files[name] = file_md5(p)
+    if contract.KIT_MODULE in (task_dir / "eval.py").read_text(encoding="utf-8"):
+        vendored = task_dir / KIT_FILE
+        files[KIT_FILE] = file_md5(vendored if vendored.is_file() else KIT_SOURCE)
+    data = {
+        p.name: file_md5(p)
+        for p in sorted(task_dir.iterdir())
+        if p.is_file() and p.name not in contract.CONTRACT_FILES and p.name != KIT_FILE
+    }
+    return {"schema": FINGERPRINT_SCHEMA, "files": files, "data": data}
+
+
+def same_package(recorded: dict | None, task_dir: Path) -> bool:
+    """Does a recorded fingerprint describe the package at `task_dir` today?"""
+    if not recorded:
+        return False
+    if "schema" not in recorded:
+        return recorded == fingerprint_v1(task_dir)
+    return recorded == fingerprint(task_dir)
+
+
+def fingerprint_changes(recorded: dict | None, task_dir: Path) -> list[str]:
+    """Which parts of the package differ from a recorded fingerprint."""
+    if not recorded:
+        return ["no fingerprint recorded"]
+    if "schema" not in recorded:
+        now = fingerprint_v1(task_dir)
+        return [f for f in sorted(set(recorded) | set(now)) if recorded.get(f) != now.get(f)]
+    now = fingerprint(task_dir)
+    out = []
+    for part in ("files", "data"):
+        a, b = recorded.get(part) or {}, now.get(part) or {}
+        out += [f for f in sorted(set(a) | set(b)) if a.get(f) != b.get(f)]
     return out
