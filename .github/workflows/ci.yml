@@ -23,8 +23,9 @@ jobs:
       # `uv sync` below made, and nothing else.
       UV_NO_SYNC: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      # setup-uv publishes no major tags since v8: pinned to its release
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: "3.12"
       # The fast suite needs no JAX: skip the multi-GB CUDA stack group.
