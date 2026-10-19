@@ -1,4 +1,4 @@
-# PINNForge
+<h1 align="center"><img src="pinnforge/ui/static/favicon.svg" alt="" width="44" align="absmiddle"> PINNForge</h1>
 
 PINNForge is a knowledge-centric agent system for the autonomous discovery of
 physics-informed neural network (PINN) solvers. It pairs two knowledge bases,
