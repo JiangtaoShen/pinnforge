@@ -40,6 +40,14 @@
     st_clean: "clean", st_violated: "violated", st_unchecked: "unchecked",
     integrity: "integrity", blocksOf: "{0}/{1} blocks", table: "Table", snapshot: "snapshot",
     replay: "Discovery replay",
+    del: "Delete", delRun: "Delete run {0}?", delTask: "Delete task {0}?",
+    delRunBody: "This removes the run's folder (its blocks, candidates, evaluations, summaries, " +
+      "agent logs, archived fields and discovery film) and its score ledger. It cannot be undone.",
+    delTaskBody: "This removes the task's folder with its reference answers and its anchor. " +
+      "Runs made from it keep their own copy of the task, but cannot be resumed. It cannot be undone.",
+    delHow: "The dashboard never changes anything, so the deletion runs in a terminal, in the " +
+      "workspace. It lists what it will remove and asks before it does.",
+    copy: "Copy", copied: "Copied", close: "Close",
   };
   const store = {
     get(k) { try { return window.localStorage.getItem(k); } catch { return null; } },
@@ -112,6 +120,7 @@
       ["path", { class: "draw", pathLength: 1, d: "M2 14.8H14" }]],
     reference: [["circle", { cx: 8, cy: 8, r: 5 }], ["circle", { class: "ring", cx: 8, cy: 8, r: 5 }],
       ["circle", { class: "fill", cx: 8, cy: 8, r: 1.8 }]],
+    trash: [["path", { d: "M2.5 4.5H13.5M6 4.5V2.5H10V4.5M4 4.5L4.8 14H11.2L12 4.5M6.8 7V11.5M9.2 7V11.5" }]],
     problem: [["path", { d: "M3.5 1.5H10L12.5 4V14.5H3.5Z" }], ["path", { d: "M5.8 6.5H10.2" }],
       ["path", { class: "draw", pathLength: 1, d: "M5.8 9.5H10.2M5.8 12H8.6" }]],
   };
@@ -307,6 +316,46 @@
     };
   }
 
+  // ───────────────────────────── deleting ─────────────────────────────
+  // The dashboard is read-only — any local process can reach it, a block's
+  // agent included — so it never deletes anything. It shows the command that
+  // does, for the operator to run in a terminal (`pinnforge run|task delete`).
+  function confirmDelete(kind, id) {
+    // Run from the workspace, wherever the terminal opens: `;` chains in PowerShell and in
+    // sh, and single quotes are literal in both (a `$` in a path is not expanded).
+    const where = S.ws.path && !S.ws.path.includes("'") ? `cd '${S.ws.path}'; ` : "";
+    const cmd = `${where}pinnforge ${kind} delete ${id}`;
+    const code = h("code", { class: "cmd", text: cmd });
+    const copyBtn = h("button", { class: "btn", type: "button" }, T("copy"));
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(cmd);
+        copyBtn.textContent = T("copied");
+      } catch {  // no clipboard: select the command for Ctrl-C instead
+        const range = document.createRange();
+        range.selectNodeContents(code);
+        getSelection().removeAllRanges();
+        getSelection().addRange(range);
+      }
+    });
+    const dlg = h("dialog", { class: "confirm", "aria-label": T(kind === "run" ? "delRun" : "delTask", id) },
+      h("h3", {}, icon("trash"), T(kind === "run" ? "delRun" : "delTask", id)),
+      h("p", { text: T(kind === "run" ? "delRunBody" : "delTaskBody") }),
+      h("p", { class: "muted", text: T("delHow") }),
+      h("div", { class: "cmd-row" }, code, copyBtn),
+      h("div", { class: "actions" }, h("button", { class: "btn", type: "button", onclick: () => dlg.close() }, T("close"))));
+    dlg.addEventListener("close", () => dlg.remove());
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });  // the backdrop
+    document.body.append(dlg);
+    dlg.showModal();
+  }
+  // nothing to delete in a report or a film: the file is all there is
+  const deleteButton = (kind, id, small = false) => (window.__PF_STATIC__ ? null :
+    h("button", { class: `btn danger${small ? " small" : ""}`, type: "button", title: T(kind === "run" ? "delRun" : "delTask", id),
+      "aria-label": T(kind === "run" ? "delRun" : "delTask", id),
+      onclick: (e) => { e.preventDefault(); e.stopPropagation(); confirmDelete(kind, id); } },
+    icon("trash"), small ? null : T("del")));
+
   // ───────────────────────────── overview ─────────────────────────────
   async function viewOverview(first) {
     const data = await get("/api/overview");
@@ -342,7 +391,7 @@
       if (!card) {
         card = h("a", { class: "card run-card", href: `#/run/${encodeURIComponent(r.id)}`, "data-run": r.id },
           h("div", { class: "top" }, h("span", { class: "name", text: r.id }), h("span", { class: "task" }),
-            h("span", { class: "st" })),
+            h("span", { class: "st" }), deleteButton("run", r.id, true)),
           h("div", { class: "nums" }, h("span", { class: "best", "data-v": "" }), h("span", { class: "vs" })),
           h("div", { class: "sparkh" }),
           h("div", { class: "foot" }, h("span", { class: "blk" }), h("span", { class: "upd" })));
@@ -402,11 +451,12 @@
         h("td", {}, h("b", { text: t.name })),
         h("td", { text: t.title }),
         h("td", {}, state, label ? h("span", { class: "pill", text: label }) : null),
-        h("td", { class: "num", text: fmtScore(t.anchor) }));
+        h("td", { class: "num", text: fmtScore(t.anchor) }),
+        h("td", { class: "del" }, deleteButton("task", t.name, true)));
     });
-    host.replaceChildren(h("table", {},
+    host.replaceChildren(h("table", { class: "task-table" },
       h("thead", {}, h("tr", {}, h("th", { text: T("task") }), h("th", { text: T("title") }),
-        h("th", { text: T("state") }), h("th", { class: "num", text: T("anchor") }))),
+        h("th", { text: T("state") }), h("th", { class: "num", text: T("anchor") }), h("th", { class: "del" }))),
       h("tbody", {}, rows)));
   }
 
@@ -506,7 +556,7 @@
     fieldCard.firstChild.append(h("span", { class: "head-tools", id: "field-tools", hidden: true }));
     app.replaceChildren(
       h("div", { class: "page-title" }, h("h1", { id: "run-title" }),
-        h("span", { class: "meta", id: "run-meta" }), h("span", { id: "run-status" })),
+        h("span", { class: "meta", id: "run-meta" }), h("span", { id: "run-status" }), deleteButton("run", run.id)),
       h("div", { class: "tiles run-tiles", id: "run-tiles" }),
       h("div", { class: "cockpit", id: "run-cockpit" },
         h("div", { class: "col" },
@@ -1276,7 +1326,7 @@
     if (first || !app.querySelector("#task-steps")) {
       app.replaceChildren(
         h("div", { class: "page-title" }, h("h1", { text: t.name }), h("span", { class: "meta", id: "task-title" }),
-          h("span", { id: "task-state" })),
+          h("span", { id: "task-state" }), deleteButton("task", t.name)),
         h("div", { id: "task-ready" }),
         h("div", { class: "grid-2" },
           h("section", { class: "card" }, h("h2", {}, icon("authoring"), T("stages"), h("span", { class: "aside", id: "task-mode" })),

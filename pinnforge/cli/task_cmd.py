@@ -242,6 +242,14 @@ def register(sub) -> None:
 
     s.add_parser("list", help="list library tasks").set_defaults(func=cmd_list)
 
+    from pinnforge.cli.delete_cmd import cmd_task_delete
+
+    dl = s.add_parser("delete", help="delete a task: its package, its answers, its anchor")
+    dl.add_argument("name")
+    dl.add_argument("--with-runs", action="store_true", help="delete the runs made from it too")
+    dl.add_argument("-y", "--yes", action="store_true", help="do not ask first")
+    dl.set_defaults(func=cmd_task_delete)
+
     show = s.add_parser("show", help="show one task")
     show.add_argument("name")
     show.set_defaults(func=cmd_show)

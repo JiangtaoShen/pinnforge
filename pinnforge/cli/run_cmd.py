@@ -763,6 +763,13 @@ def register(sub) -> None:
     fm.add_argument("--timeout", type=float, default=45, help="minutes the agent may take")
     fm.set_defaults(func=cmd_film)
 
+    from pinnforge.cli.delete_cmd import cmd_run_delete
+
+    dl = s.add_parser("delete", help="delete a run: its folder and its score ledger")
+    dl.add_argument("run_id")
+    dl.add_argument("-y", "--yes", action="store_true", help="do not ask first")
+    dl.set_defaults(func=cmd_run_delete)
+
     lst = s.add_parser("list", help="list runs")
     lst.add_argument("--task", default=None)
     lst.set_defaults(func=cmd_list)
