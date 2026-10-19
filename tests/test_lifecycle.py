@@ -185,11 +185,17 @@ def test_the_anchor_is_done_only_once_it_is_scored(tmp_path):
 
 
 @posix_only  # tmux and its unix sockets
-def test_a_finished_runs_tmux_socket_is_swept(tmp_path, monkeypatch):
+def test_a_finished_runs_tmux_socket_is_swept(monkeypatch):
+    import shutil
     import socket
+    import tempfile
+    from pathlib import Path
 
-    monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))
-    base = tmp_path / f"tmux-{os.getuid()}"
+    # A short directory, as tmux's own /tmp: macOS caps a unix socket's path
+    # at 104 bytes, and its pytest temporary directories come close to that.
+    short = Path(tempfile.mkdtemp(prefix="pft", dir="/tmp"))
+    monkeypatch.setenv("TMUX_TMPDIR", str(short))
+    base = short / f"tmux-{os.getuid()}"
     base.mkdir()
 
     def sock(name, listen):
@@ -214,6 +220,7 @@ def test_a_finished_runs_tmux_socket_is_swept(tmp_path, monkeypatch):
         left = sorted(p.name for p in base.iterdir())
     finally:
         live.close()
+        shutil.rmtree(short, ignore_errors=True)
     assert left == ["pf-abc123-run-live_1", "pf-abc123-run-starting_1",
                     "pf-fff000-run-other_1"], (
         "only this workspace's dead sockets go; a live run, one still starting and "

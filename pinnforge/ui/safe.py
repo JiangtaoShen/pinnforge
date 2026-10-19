@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from pathlib import Path
 
 FORBIDDEN = ("private", ".scoreq", ".pinnforge")
@@ -35,6 +36,10 @@ def _inside(real: str, root_real: str | None) -> bool:
         if not real.startswith(prefix):
             return False
         real = real[len(prefix):]
+    elif sys.platform == "darwin" and real.startswith("/private/"):
+        # macOS keeps /tmp, /var and /etc in /private, the system's directory
+        # and never a task's answers: every resolved path there begins with it
+        real = real[len("/private"):]
     return not any(part in FORBIDDEN for part in Path(real).parts)
 
 
