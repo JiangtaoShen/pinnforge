@@ -426,7 +426,7 @@
 
     buildEq(w, h) {
       const d = this.d;
-      const p = panel("PDE", ["rRMSE", d.cpu ? "CPU" : "GPU"], w, h);
+      const p = panel("PDE", ["Relative L² error", d.cpu ? "CPU" : "GPU"], w, h);
       const list = el("div", "rp-eqs");
       this.eqRows = (d.equations || []).map((e) => {
         const row = el("div", "rp-eq");
@@ -527,7 +527,7 @@
         return { col, tiles };
       };
       const pred = column("pred", "Prediction");
-      const diff = column("diff", "Change made by the champion");
+      const diff = column("diff", "Change made by the incumbent");
       const sep = el("div", "rp-vsep");
       wrap.append(pred.col, sep, diff.col);
       p.body.append(wrap);
@@ -564,7 +564,7 @@
         const dv = frame != null && f.diffs[i] && f.diffs[i][k];
         predCol.tiles[k].note.textContent = frame == null ? "No prediction yet" : "";
         diffCol.tiles[k].note.textContent = frame == null ? "No prediction yet"
-          : dv ? "" : (i === 0 || f.order[i - 1] == null) ? "First champion" : "Champion held";
+          : dv ? "" : (i === 0 || f.order[i - 1] == null) ? "First incumbent" : "Incumbent held";
         const paint = (vals, lo, hi, L) => (ctx, Wp, Hp) => {
           if (!vals) return;
           if (f.Y) {
@@ -582,7 +582,7 @@
       const p = panel("Convergence", [], w, h, {});
       const top = el("div", "rp-conv-top");
       this.champ = el("span", "rp-big", "—");
-      top.append(el("span", "rp-label strong", "Champion score"), this.champ);
+      top.append(el("span", "rp-label strong", "Incumbent error"), this.champ);
       this.convSvg = document.createElementNS(SVGNS, "svg");
       this.convSvg.setAttribute("class", "rp-conv");
       this.convW = w - 28; this.convH = h - 78 - 20;
@@ -610,7 +610,7 @@
         `<line class="a" x1="${gx}" x2="${gx + gw + 4}" y1="${gy + gh}" y2="${gy + gh}"/>`);
       if (d.baseline) {
         parts.push(`<line class="base" x1="${gx}" x2="${gx + gw}" y1="${Y(d.baseline)}" y2="${Y(d.baseline)}"/>`,
-          `<text class="t base-t" x="${gx + gw}" y="${Y(d.baseline) - 6}" text-anchor="end">b00 baseline</text>`);
+          `<text class="t base-t" x="${gx + gw}" y="${Y(d.baseline) - 6}" text-anchor="end">anchor</text>`);
       }
       for (let i = 0; i <= cur.i; i++) {
         const vis = i === cur.i ? clamp((cur.ph - 0.2) / 0.5, 0, 1) : 1;
@@ -667,7 +667,7 @@
 
     buildKB1(w, h) {
       const d = this.d;
-      const title = [el("span", null, "Knowledge base 1 · literature"), svgMark(ICE_SVG, 19)];
+      const title = [el("span", null, "Literature base"), svgMark(ICE_SVG, 19)];
       const p = panel(title, [], w, h, { bare: true });
       const COLS = 20;
       const cell = Math.min(23, Math.floor((w - 28 - (COLS - 1) * 3) / COLS));
@@ -687,12 +687,12 @@
     }
 
     buildKB2(w, h) {
-      const title = [el("span", null, "Knowledge base 2 · practice"), (() => { const f = el("span", "rp-flame"); f.append(el("span", "rp-flame-glow"), svgMark(FLAME_SVG, 19)); return f; })()];
+      const title = [el("span", null, "Experience base"), (() => { const f = el("span", "rp-flame"); f.append(el("span", "rp-flame-glow"), svgMark(FLAME_SVG, 19)); return f; })()];
       const p = panel(title, [], w, h, { bare: true });
       const top = el("div", "rp-kb2-top");
       this.kb2Count = el("span", "rp-big", "0");
       const line = el("div", "rp-kb2-line");
-      line.append(this.kb2Count, el("span", "rp-label", "Entries written by the agent"));
+      line.append(this.kb2Count, el("span", "rp-label", "Notes written by the rounds"));
       this.kb2Segs = el("div", "rp-segs");
       this.segs = Array.from({ length: 40 }, () => { const s = el("div", "rp-seg"); this.kb2Segs.append(s); return s; });
       top.append(line, this.kb2Segs);
@@ -710,9 +710,9 @@
       const mark = el("div", "rp-cover-mark");
       mark.append(svgMark(FORGE_SVG, 82));
       const title = el("div", "rp-cover-title", "PINNForge");
-      const sub = el("div", "rp-cover-sub", "Agent system for autonomous PINN discovery");
+      const sub = el("div", "rp-cover-sub", "Knowledge-centric agent system for the autonomous discovery of PINN solvers");
       const chips = el("div", "rp-cover-chips");
-      const chipEls = ["Knowledge-centric", "Multi-agent collaboration", "End-to-end automation"].map((k) => {
+      const chipEls = ["Literature base", "Experience base", "Agent harness"].map((k) => {
         const c = el("div", "rp-cover-chip");
         c.append(el("i"), el("span", null, k));
         chips.append(c);
@@ -724,7 +724,7 @@
         const d = this.d;
         result = el("div", "rp-cover-result");
         const factor = d.factor ? `${d.factor >= 10 ? d.factor.toFixed(0) : d.factor.toFixed(1)}×` : "—";
-        result.append(el("span", "rp-strong", d.name || d.task), el("span", null, "rRMSE"),
+        result.append(el("span", "rp-strong", d.name || d.task), el("span", null, "error"),
           el("span", null, d.baseline != null ? d.baseline.toFixed(4) : "—"), el("span", "rp-faint", "→"),
           el("span", "rp-accent", sci(d.final)), el("span", "rp-strong", factor), el("span", "rp-faint", "lower error"));
         center.append(result);
@@ -744,8 +744,8 @@
       const d = this.d, b = cur.b;
       this.agent.setRight([b.id, fmtDuration(b.cost.duration_ms)]);
       this.headline.textContent = b.headline || b.id;
-      const fork = b.fork && b.fork !== "baseline" ? `Forked from ${b.fork}` : b.fork === "baseline" ? "Forked from the task's baseline" : "";
-      this.thrustText = b.thrust || (b.id === "b00" ? "The task's baseline, copied and evaluated as it is — the control every block is measured against." : "");
+      const fork = b.fork && b.fork !== "baseline" ? `Forked from ${b.fork}` : b.fork === "baseline" ? "Forked from the standard PINN" : "";
+      this.thrustText = b.thrust || (b.id === "b00" ? "Round 0: the standard PINN of the task, trained once — the anchor every round is measured against." : "");
       this.forkText = fork;
       this.tags.replaceChildren(...(b.tags || []).slice(0, 6).map((t) => el("span", "rp-tag", t)));
       this.quote.textContent = dropEnum((b.findings || [])[0] || "").slice(0, 170);

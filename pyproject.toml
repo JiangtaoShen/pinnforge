@@ -1,7 +1,7 @@
 [project]
 name = "pinnforge"
 version = "0.2.0"
-description = "PINNForge — knowledge-centric multi-agent system for autonomous PINN design"
+description = "PINNForge — knowledge-centric agent system for the autonomous discovery of PINN solvers"
 # Below 3.14: the pinned numpy (2.1.1, shared with the stack) has no wheels for it.
 requires-python = ">=3.11,<3.14"
 dependencies = [

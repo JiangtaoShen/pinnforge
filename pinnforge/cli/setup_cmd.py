@@ -218,7 +218,7 @@ def cmd_setup_gpus(args) -> int:
 
 
 def register(sub) -> None:
-    p = sub.add_parser("setup", help="choose the coding agent that runs blocks, and the GPUs")
+    p = sub.add_parser("setup", help="choose the coding agent that runs the rounds, and the GPUs")
     p.add_argument("--non-interactive", action="store_true", help="report only; change nothing")
     p.add_argument("--ping-timeout", type=float, default=120.0)
     p.set_defaults(func=cmd_setup)

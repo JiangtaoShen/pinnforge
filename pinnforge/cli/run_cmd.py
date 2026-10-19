@@ -704,16 +704,16 @@ def register(sub) -> None:
     p = sub.add_parser("run", help="start, resume and inspect runs")
     s = p.add_subparsers(dest="run_cmd", required=True)
 
-    start = s.add_parser("start", help="create a run and execute its blocks")
+    start = s.add_parser("start", help="create a discovery run and carry out its rounds")
     start.add_argument("-t", "--task", required=True)
-    start.add_argument("-n", "--blocks", type=int, default=1)
+    start.add_argument("-n", "--blocks", type=int, default=1, help="rounds after round 0")
     start.add_argument("--agent", default=None,
                        help="agent binding from `pinnforge setup` (default: the default binding)")
     start.add_argument("--runtime", default=None, help="harness CLI, instead of a binding")
     start.add_argument(
         "--model",
         default="",
-        help="model id for every block, e.g. claude-opus-4-8. Prefer an exact id "
+        help="model id for every round, e.g. claude-opus-4-8. Prefer an exact id "
         "over an alias like `opus`: an alias moves between model generations and "
         "two runs that share it are not comparable",
     )
@@ -723,9 +723,9 @@ def register(sub) -> None:
         help="the cards for this run: all, none, or ids such as 1, 0,1 or '0 1' "
         "(default: the workspace's sandbox.gpus — see `pinnforge setup gpus`)",
     )
-    start.add_argument("--budget", default="", help="per-block GPU wall seconds")
-    start.add_argument("--no-anchor", action="store_true", help="skip the b00 control node")
-    start.add_argument("--force", action="store_true", help="run blocks even without an anchor")
+    start.add_argument("--budget", default="", help="GPU budget of a round, in wall seconds")
+    start.add_argument("--no-anchor", action="store_true", help="skip round 0, the anchor")
+    start.add_argument("--force", action="store_true", help="run the rounds even without an anchor")
     start.add_argument("--share", action="store_true",
                        help="start even if another run is using the same GPUs")
     start.add_argument("--set", action="append", metavar="k.v=x", help="config override")
@@ -734,7 +734,7 @@ def register(sub) -> None:
 
     res = s.add_parser("resume", help="continue an interrupted run")
     res.add_argument("run_id")
-    res.add_argument("-n", "--blocks", type=int, default=None)
+    res.add_argument("-n", "--blocks", type=int, default=None, help="rounds still to run")
     _launch_flags(res)
     res.set_defaults(func=cmd_resume)
 
@@ -774,7 +774,7 @@ def register(sub) -> None:
     lst.add_argument("--task", default=None)
     lst.set_defaults(func=cmd_list)
 
-    st = s.add_parser("status", help="per-block status of one run")
+    st = s.add_parser("status", help="per-round status of one run")
     st.add_argument("run_id")
     st.set_defaults(func=cmd_status)
 
@@ -783,12 +783,12 @@ def register(sub) -> None:
     lg.add_argument("-n", "--number", type=int, default=20)
     lg.set_defaults(func=cmd_log)
 
-    sh = s.add_parser("show", help="one block's records and summary")
+    sh = s.add_parser("show", help="one round's evaluation records and summary")
     sh.add_argument("run_id")
     sh.add_argument("block")
     sh.set_defaults(func=cmd_show)
 
-    au = s.add_parser("audit", help="verify no block altered another's record")
+    au = s.add_parser("audit", help="verify that no round altered another's record")
     au.add_argument("run_id")
     au.set_defaults(func=cmd_audit)
 

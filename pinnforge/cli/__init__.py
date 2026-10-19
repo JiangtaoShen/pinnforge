@@ -31,7 +31,7 @@ from pinnforge.cli import (
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="pinnforge",
-        description="Knowledge-centric multi-agent system for autonomous PINN design.",
+        description="Knowledge-centric agent system for the autonomous discovery of PINN solvers.",
     )
     p.add_argument("--version", action="version", version=f"pinnforge {__version__}")
     p.add_argument("--root", default=None, help="project root (default: auto-detect)")

@@ -98,8 +98,8 @@ def cmd_demo(args) -> int:
 
 def register(sub) -> None:
     p = sub.add_parser("demo", help="a complete run in minutes with a scripted agent (no API key)")
-    p.add_argument("-n", "--blocks", type=int, default=2)
-    p.add_argument("--budget", type=int, default=240, help="GPU seconds per block (default 240)")
+    p.add_argument("-n", "--blocks", type=int, default=2, help="rounds after round 0")
+    p.add_argument("--budget", type=int, default=240, help="GPU seconds per round (default 240)")
     p.add_argument("--gpus", default="",
                    help="the cards to use: all, none, or ids such as 1 or 0,1 (default: the "
                    "workspace's sandbox.gpus, less any card another run holds)")

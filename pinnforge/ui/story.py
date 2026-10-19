@@ -257,7 +257,7 @@ def build(root: Path, run_id: str) -> dict:
         for f in frames:
             if f["block"] and f["block"] <= bid:
                 frame = f["frame"]
-        headline = title or (f"{bid} — control: the task's baseline, measured as it is"
+        headline = title or (f"{bid} — round 0: the standard PINN, measured as it is"
                              if bid == "b00" else f"{bid}")
         blocks.append({
             "id": bid, "status": b["status"], "headline": headline, "thrust": thrust,
