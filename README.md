@@ -95,6 +95,7 @@ pinnforge run status ldc_1                      # per block: status, GPU s, eval
 pinnforge run stop ldc_1                        # unwinds like Ctrl-C
 pinnforge run resume ldc_1
 pinnforge run audit ldc_1                       # did any block alter another's record
+pinnforge run film ldc_1                        # make its discovery film again
 ```
 
 `run start` freezes the task and the settings into `runs/<task>_<n>/`,
@@ -107,6 +108,19 @@ the segment's cost booked, the integrity verdict written — and `run stop`
 signals that process instead of editing its state. A block counts as finished
 only when its summary exists, its budget is spent, and at least one real
 evaluation is logged.
+
+**The discovery film.** The dashboard is the live view of a run. Once the run
+is over, its own agent makes a film of it: the run's complete record goes into
+`runs/<id>/discovery/` (facts, block summaries, every agent transcript, the
+corpus index, read through the dashboard's API, so nothing of the answers),
+and the agent writes the script, meaning each block's headline, line of
+attack, findings, the papers it used and a label for each candidate. A fixed
+player renders the script over the facts into `runs/<id>/discovery.html`, one
+self-contained file. Every film has the same form, and every number in it
+comes from the record, never from the agent. A script that fails its check
+gives way to a draft extracted from the summaries. `film: false` in the run's
+settings leaves the film to `pinnforge run film <id>`, and `--render-only`
+renders an edited script again.
 
 **GPUs.** Which cards a workspace's runs use is the operator's choice:
 `pinnforge init` asks when the machine has more than one (or takes `--gpus 1`,

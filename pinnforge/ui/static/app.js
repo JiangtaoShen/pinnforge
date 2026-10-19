@@ -10,19 +10,18 @@
     runs: "Runs", tasks: "Tasks", compute: "Compute", noRuns: "No runs yet.",
     startHint: "Start one:", noTasks: "No tasks yet.", live: "live", idle: "idle",
     connecting: "connecting…", connected: "live", best: "Best rRMSE", anchor: "Anchor (b00)",
-    vsAnchor: "{0}× better than the anchor", evals: "Evaluations", errors: "{0} failed",
-    gpuTime: "GPU time", cpuTime: "CPU time", cost: "Model cost", tokens: "{0} tokens", progress: "Progress",
-    progressSub: "Every scored evaluation, by cumulative {0}; the line is the best so far.",
+    vsAnchor: "{0}× better than the anchor", betterBy: "×{0} better", evals: "Evaluations", errors: "{0} failed",
+    gpuTime: "GPU time", cpuTime: "CPU time", cost: "Model cost", tokens: "{0} tokens", progress: "Convergence",
+    yTitle: "Relative L² error", noGpuRun: "no GPU in this run",
+    metaWorkspace: "workspace", metaTask: "task", metaTrain: "train wall", metaAgent: "agent", metaModel: "model",
     legendEval: "evaluation", legendCur: "current block", legendBest: "best so far",
-    legendAnchor: "anchor", legendErr: "failed evaluation", field: "Predicted field",
-    fieldSub: "The best predictions so far, as the blocks found them.",
+    legendErr: "failed", field: "Predicted field",
     noFrames: "The field appears here once an evaluation is scored.",
-    play: "Play", pause: "Pause", latest: "Latest", timeSlice: "t =", agent: "Agent activity",
-    noActivity: "No agent activity yet.", blocks: "Blocks", summary: "Summary",
-    noSummary: "This block has not written its summary yet.", evalTable: "Evaluations",
+    play: "Play", pause: "Pause", timeSlice: "t =", agent: "Agent activity",
+    noActivity: "No agent activity yet.", blocks: "Blocks", evalTable: "Evaluations",
     block: "Block", candidate: "Candidate", score: "rRMSE", wall: "Wall s", when: "When",
-    status: "Status", spentOf: "{0} / {1} s", nEvals: "{0} evals", gpus: "GPUs", util: "util",
-    mem: "mem", usedBy: "in use by {0}", free: "free", notInPool: "not used by this workspace", noGpu: "No GPU visible — CPU mode.",
+    status: "Status", spentOf: "{0} / {1} s", nEvals: "{0} evals", gpus: "GPUs", util: "Utilization",
+    mem: "Memory", usedBy: "in use by {0}", free: "free", noGpu: "No GPU visible — CPU mode.",
     model: "Model", task: "Task", title: "Title", state: "State", ready: "ready",
     authoring: "authoring: {0}", failedAt: "failed at {0}", stages: "Authoring",
     reference: "Reference", refBuilt: "built by an agent", refOperator: "from the operator",
@@ -40,6 +39,7 @@
     st_measuring: "measuring", st_missing: "missing", st_unreadable: "unreadable",
     st_clean: "clean", st_violated: "violated", st_unchecked: "unchecked",
     integrity: "integrity", blocksOf: "{0}/{1} blocks", table: "Table", snapshot: "snapshot",
+    replay: "Discovery replay",
   };
   const store = {
     get(k) { try { return window.localStorage.getItem(k); } catch { return null; } },
@@ -51,6 +51,7 @@
     return text;
   };
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const FILM = !!window.__PF_FILM__;  // this page is a discovery film, not the live dashboard
 
   // ───────────────────────────── DOM helpers ─────────────────────────────
   function h(tag, props, ...kids) {
@@ -82,6 +83,41 @@
     return el;
   }
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  // A panel's mark: a 16-pixel line drawing in the accent, with one small
+  // motion that says what the panel holds (app.css, "panel icons").
+  const ICONS = {
+    agent: [["rect", { x: 2.5, y: 5, width: 11, height: 8.5, rx: 2 }], ["path", { d: "M8 2.8V5" }],
+      ["circle", { class: "fill pulse", cx: 8, cy: 2.2, r: 1.1 }],
+      ["g", { class: "blink" }, [["circle", { class: "fill", cx: 6, cy: 9.2, r: 1 }],
+        ["circle", { class: "fill", cx: 10, cy: 9.2, r: 1 }]]]],
+    field: [["rect", { x: 1.5, y: 1.5, width: 13, height: 13, rx: 1.5 }],
+      ["path", { class: "flow", d: "M1.5 9.5C4 5.5 6 5.5 8 8.5S12 11.5 14.5 7" }]],
+    convergence: [["path", { class: "dim", d: "M2 1.5V14.5H14.5" }],
+      ["path", { class: "draw", pathLength: 1, d: "M3.8 3.5C5.5 9 8 11 13.5 12" }]],
+    blocks: [["rect", { class: "step", x: 1.2, y: 5.6, width: 3.8, height: 4.8, rx: 0.6 }],
+      ["rect", { class: "step", x: 6.1, y: 5.6, width: 3.8, height: 4.8, rx: 0.6 }],
+      ["rect", { class: "step", x: 11, y: 5.6, width: 3.8, height: 4.8, rx: 0.6 }]],
+    evals: [["path", { d: "M2 12A6 6 0 0 1 14 12" }], ["path", { class: "needle", d: "M8 12V6.6" }],
+      ["circle", { class: "fill", cx: 8, cy: 12, r: 1.2 }]],
+    compute: [["rect", { x: 4, y: 4, width: 8, height: 8, rx: 1 }],
+      ["rect", { class: "fill pulse", x: 6.4, y: 6.4, width: 3.2, height: 3.2 }],
+      ["path", { d: "M6 1.5V4M10 1.5V4M6 12V14.5M10 12V14.5M1.5 6H4M1.5 10H4M12 6H14.5M12 10H14.5" }]],
+    runs: [["circle", { class: "spin", cx: 8, cy: 8, r: 6.2, "stroke-dasharray": "3 2.2" }],
+      ["path", { class: "fill", d: "M6.6 5.4L10.8 8L6.6 10.6Z" }]],
+    tasks: [["circle", { class: "step", cx: 3, cy: 4, r: 1.1 }], ["path", { d: "M6 4H14" }],
+      ["circle", { class: "step", cx: 3, cy: 8, r: 1.1 }], ["path", { d: "M6 8H14" }],
+      ["circle", { class: "step", cx: 3, cy: 12, r: 1.1 }], ["path", { d: "M6 12H11" }]],
+    authoring: [["path", { d: "M10.5 2L13.5 5L6 12.5H3V9.5Z" }],
+      ["path", { class: "draw", pathLength: 1, d: "M2 14.8H14" }]],
+    reference: [["circle", { cx: 8, cy: 8, r: 5 }], ["circle", { class: "ring", cx: 8, cy: 8, r: 5 }],
+      ["circle", { class: "fill", cx: 8, cy: 8, r: 1.8 }]],
+    problem: [["path", { d: "M3.5 1.5H10L12.5 4V14.5H3.5Z" }], ["path", { d: "M5.8 6.5H10.2" }],
+      ["path", { class: "draw", pathLength: 1, d: "M5.8 9.5H10.2M5.8 12H8.6" }]],
+  };
+  const mark = ([tag, attrs, kids]) => s(tag, attrs, ...(kids || []).map(mark));
+  const icon = (name) => s("svg", { class: `ic ic-${name}`, viewBox: "0 0 16 16", "aria-hidden": "true" },
+    ...(ICONS[name] || []).map(mark));
 
   // ───────────────────────────── formatting ─────────────────────────────
   function fmtScore(x) {
@@ -147,7 +183,9 @@
 
   // ───────────────────────────── tooltip ─────────────────────────────
   const tip = document.getElementById("tooltip");
+  let tipOwner = null;  // the element whose hover put the tooltip up
   function showTip(evt, rows) {
+    tipOwner = evt.currentTarget instanceof Element ? evt.currentTarget : null;
     tip.replaceChildren(...rows);
     tip.hidden = false;
     const pad = 14, w = tip.offsetWidth, hgt = tip.offsetHeight;
@@ -157,7 +195,15 @@
     tip.style.left = `${x}px`;
     tip.style.top = `${y}px`;
   }
-  const hideTip = () => { tip.hidden = true; };
+  const hideTip = () => { tip.hidden = true; tipOwner = null; };
+  // An owner redrawn under the pointer (a live refresh replaces it) never
+  // hears the pointer leave, so the tooltip also goes when the pointer is over
+  // anything else, or its owner has left the page.
+  document.addEventListener("pointermove", (e) => {
+    if (!tip.hidden && (!tipOwner || !tipOwner.isConnected || !tipOwner.contains(e.target))) hideTip();
+  });
+  document.documentElement.addEventListener("pointerleave", hideTip);  // out of the window
+  const dropOrphanTip = () => { if (!tip.hidden && (!tipOwner || !tipOwner.isConnected)) hideTip(); };
 
   // ───────────────────────────── data ─────────────────────────────
   async function get(path) {
@@ -172,7 +218,8 @@
 
   const S = {
     route: [], overview: null, gpus: [], gpuHist: {}, frames: new Map(),
-    run: null, runSeen: {}, player: null, feed: null, selBlock: null, task: null,
+    run: null, runSeen: {}, player: null, feed: null, selBlock: null, task: null, replay: null,
+    ws: { name: "", path: "" },  // the workspace served, from /api/ping
   };
 
   // ───────────────────────────── routing ─────────────────────────────
@@ -186,6 +233,8 @@
     S.route = parseRoute();
     S.player && S.player.stop();
     S.player = null;
+    S.replay && S.replay.destroy();
+    S.replay = null;
     S.feed = null;
     S.selBlock = null;
     app.replaceChildren();
@@ -194,9 +243,12 @@
   }
   function crumbs() {
     const c = document.getElementById("crumbs");
-    const [kind, id] = S.route;
+    const [kind, id, sub] = S.route;
     const items = [h("a", { href: "#/", text: T("back") })];
-    if (kind === "run" && id) items.push(h("span", { class: "sep", text: "/" }), h("span", { text: id }));
+    if (kind === "run" && id && sub === "replay" && FILM) {
+      items.push(h("span", { class: "sep", text: "/" }), h("a", { href: `#/run/${encodeURIComponent(id)}`, text: id }),
+        h("span", { class: "sep", text: "/" }), h("span", { text: T("replay") }));
+    } else if (kind === "run" && id) items.push(h("span", { class: "sep", text: "/" }), h("span", { text: id }));
     if (kind === "task" && id) items.push(h("span", { class: "sep", text: "/" }), h("span", { text: id }));
     c.replaceChildren(...items);
   }
@@ -206,8 +258,9 @@
     if (refreshing) { again = true; return; }
     refreshing = true;
     try {
-      const [kind, id] = S.route;
-      if (kind === "run" && id) await viewRun(id, first);
+      const [kind, id, sub] = S.route;
+      if (kind === "run" && id && sub === "replay" && FILM) await viewReplay(id, first);
+      else if (kind === "run" && id) await viewRun(id, first);
       else if (kind === "task" && id) await viewTask(id, first);
       else await viewOverview(first);
     } catch (e) {
@@ -215,6 +268,7 @@
       else console.error(e);
     } finally {
       refreshing = false;
+      dropOrphanTip();
       if (again) { again = false; refresh(); }
     }
   }
@@ -257,15 +311,14 @@
   async function viewOverview(first) {
     const data = await get("/api/overview");
     S.overview = data;
-    document.getElementById("ws-name").textContent = data.name;
     document.title = `PINNForge — ${data.name}`;
     if (first || !app.querySelector("#ov-runs")) {
       app.replaceChildren(
         h("div", { class: "page-title" }, h("h1", { text: data.name }),
           h("span", { class: "meta", text: `${data.workspace} · pinnforge ${data.version}` })),
-        h("section", { class: "card" }, h("h2", {}, T("compute")), h("div", { id: "ov-gpus", class: "gpus" })),
-        h("section", {}, h("h2", { class: "section-h", text: T("runs") }), h("div", { id: "ov-runs", class: "grid-3" })),
-        h("section", { class: "card" }, h("h2", {}, T("tasks")), h("div", { id: "ov-tasks" })),
+        h("section", { class: "card" }, h("h2", {}, icon("compute"), T("compute")), h("div", { id: "ov-gpus", class: "gpus" })),
+        h("section", {}, h("h2", { class: "section-h" }, icon("runs"), T("runs")), h("div", { id: "ov-runs", class: "grid-3" })),
+        h("section", { class: "card" }, h("h2", {}, icon("tasks"), T("tasks")), h("div", { id: "ov-tasks" })),
       );
     }
     renderRunCards(document.getElementById("ov-runs"), data.runs);
@@ -383,14 +436,15 @@
       card.querySelector(".mv").textContent = `${((g.mem_used || 0) / 1024).toFixed(1)} GB`;
       card.querySelector(".histh").replaceChildren(utilHistory(S.gpuHist[g.index] || []));
       const holder = leases[g.index] ?? leases[String(g.index)];
-      const temp = g.temp != null ? `${Math.round(g.temp)} °C` : "";
-      const power = g.power != null ? ` · ${Math.round(g.power)} W` : "";
       const unused = Array.isArray(pool) && !pool.includes(g.index);
-      card.classList.toggle("unused", unused);
-      const who = card.querySelector(".who");
-      who.replaceChildren(holder
-        ? h("a", { href: `#/run/${encodeURIComponent(holder)}`, text: T("usedBy", holder) })
-        : h("span", { text: T(unused ? "notInPool" : "free") }), ` · ${temp}${power}`);
+      card.classList.toggle("unused", unused);  // dimmed: outside this workspace's cards
+      const parts = [
+        holder ? h("a", { href: `#/run/${encodeURIComponent(holder)}`, text: T("usedBy", holder) })
+          : unused ? null : h("span", { text: T("free") }),
+        g.temp != null ? `${Math.round(g.temp)} °C` : null,
+        g.power != null ? `${Math.round(g.power)} W` : null,
+      ].filter(Boolean);
+      card.querySelector(".who").replaceChildren(...parts.flatMap((p, i) => (i ? [" · ", p] : [p])));
     }
   }
   function utilHistory(hist) {
@@ -420,41 +474,54 @@
     updateRunHeader(run);
     updateTiles(run, prev);
     fitScreen();  // the tiles above it are in place now
+    renderGantt(document.getElementById("run-gantt"), run);  // its rows take room from the chart
     renderScoreChart(document.getElementById("run-chart"), run, prev);
-    renderGantt(document.getElementById("run-gantt"), run);
-    await Promise.all([updatePlayer(run), updateFeed(run), updateSummary(run)]);
+    await Promise.all([updatePlayer(run), updateFeed(run)]);
     renderEvalTable(document.getElementById("run-table"), run);
   }
 
-  // a run with no card trains on the CPU; its clock is not a GPU's
-  const timeLabel = (run) => T(((run.config && run.config.gpus) || []).length ? "gpuTime" : "cpuTime");
+  // A finished run as a film (replay.js), in the file an agent's script was
+  // rendered into (pinnforge/discovery.py): mounted once, never refreshed.
+  async function viewReplay(id, first) {
+    if (!first && S.replay) return;
+    document.title = `${id} — ${T("replay")} — PINNForge`;
+    const host = h("div", { class: "replay-page" });
+    app.replaceChildren(host);
+    S.replay = await window.PFReplay.mount(host, id);
+  }
 
+  // a run with no card trains on the CPU; its clock is not a GPU's
+  const onGpu = (run) => ((run.config && run.config.gpus) || []).length > 0;
+  const timeLabel = (run) => T(onGpu(run) ? "gpuTime" : "cpuTime");
+
+  // A run on one screen, in three columns: the agent, given a whole column
+  // for the most text; the score over the blocks; the evaluations over the
+  // field they produced.
   function buildRunLayout(run) {
+    const card = (cls, ic, title, asideId, ...body) => h("section", { class: `card ${cls}` },
+      h("h2", {}, icon(ic), title, asideId ? h("span", { class: "aside", id: asideId }) : null), ...body);
+    // the field's player controls ride in its header, leaving the panel to the field
+    const fieldCard = card("c-field", "field", T("field"), null,
+      h("div", { id: "run-field", class: "field" }));
+    fieldCard.firstChild.append(h("span", { class: "head-tools", id: "field-tools", hidden: true }));
     app.replaceChildren(
-      h("div", { class: "page-title" }, h("h1", { id: "run-title" }), h("span", { class: "meta", id: "run-meta" }),
-        h("span", { id: "run-status" })),
-      h("div", { class: "tiles", id: "run-tiles" }),
-      // What a run is doing now fits one desktop screen: the score and the
-      // blocks on the left, the field in the middle, the agent on the right.
+      h("div", { class: "page-title" }, h("h1", { id: "run-title" }),
+        h("span", { class: "meta", id: "run-meta" }), h("span", { id: "run-status" })),
+      h("div", { class: "tiles run-tiles", id: "run-tiles" }),
       h("div", { class: "cockpit", id: "run-cockpit" },
-        h("section", { class: "card c-progress" }, h("h2", {}, T("progress")),
-          h("p", { class: "sub", text: T("progressSub", timeLabel(run)) }),
-          h("div", { id: "run-chart" }),
-          h("div", { class: "legend" },
-            h("span", {}, h("i", { class: "k-dot" }), T("legendEval")),
-            h("span", {}, h("i", { class: "k-cur" }), T("legendCur")),
-            h("span", {}, h("i", { class: "k-line" }), T("legendBest")),
-            h("span", {}, h("i", { class: "k-dash" }), T("legendAnchor")),
-            h("span", {}, h("i", { class: "k-err" }), T("legendErr")))),
-        h("section", { class: "card c-field" }, h("h2", {}, T("field"), h("span", { class: "aside", id: "field-aside" })),
-          h("p", { class: "sub", text: T("fieldSub") }), h("div", { id: "run-field", class: "field" })),
-        h("section", { class: "card c-agent" }, h("h2", {}, T("agent"), h("span", { class: "aside", id: "feed-aside" })),
-          h("div", { id: "run-feed", class: "feed", "aria-live": "polite" })),
-        h("section", { class: "card c-blocks" }, h("h2", {}, T("blocks")), h("div", { id: "run-gantt", class: "gantt" }))),
-      // the record, below the fold
-      h("div", { class: "grid-2" },
-        h("section", { class: "card" }, h("h2", { id: "sum-h" }, T("summary")), h("div", { id: "run-summary", class: "md" })),
-        h("section", { class: "card" }, h("h2", {}, T("evalTable")), h("div", { id: "run-table" }))),
+        h("div", { class: "col" },
+          card("c-agent", "agent", T("agent"), "feed-aside", h("div", { id: "run-feed", class: "feed", "aria-live": "polite" }))),
+        h("div", { class: "col" },
+          card("c-progress", "convergence", T("progress"), null, h("div", { id: "run-chart" }),
+            h("div", { class: "legend" },
+              h("span", {}, h("i", { class: "k-dot" }), T("legendEval")),
+              h("span", {}, h("i", { class: "k-cur" }), T("legendCur")),
+              h("span", {}, h("i", { class: "k-line" }), T("legendBest")),
+              h("span", {}, h("i", { class: "k-err" }), T("legendErr")))),
+          card("c-blocks", "blocks", T("blocks"), null, h("div", { id: "run-gantt", class: "gantt" }))),
+        h("div", { class: "col" },
+          card("c-evals", "evals", T("evalTable"), "evals-aside", h("div", { id: "run-table", class: "table-box" })),
+          fieldCard)),
     );
   }
 
@@ -463,7 +530,7 @@
     for (const el of app.querySelectorAll(".cockpit, .screen")) {
       if (getComputedStyle(el).display !== "grid") { el.style.height = ""; continue; }
       const top = el.getBoundingClientRect().top + window.scrollY;
-      el.style.height = `${Math.max(460, window.innerHeight - top - 20)}px`;
+      el.style.height = `${Math.max(460, window.innerHeight - top - 28)}px`;  // main's own foot
     }
   }
   // inside a fitted grid a chart takes the height it is given
@@ -472,13 +539,50 @@
     return !!grid && getComputedStyle(grid).display === "grid";
   };
 
+  // the agents a run can be given, by the id its run.yaml names
+  const RUNTIMES = {
+    replay: ["Scripted demo agent", "replays a fixed playbook; calls no model"],
+    claude_code: ["Claude Code"], codex: ["Codex"], cursor_agent: ["Cursor Agent"], opencode: ["OpenCode"],
+  };
+  // hovering an element shows its rows ([label, text, isPath]) in the tooltip
+  function hoverTip(el, rows) {
+    rows = rows.filter((r) => r && r[1]);
+    if (!rows.length) return el;
+    const draw = () => rows.map(([k, v, path]) => h("div", { class: "tip-row" },
+      h("span", { class: "tip-k", text: k }), h("span", { class: path ? "tip-p" : "tip-v", text: v })));
+    el.addEventListener("pointermove", (e) => showTip(e, draw()));
+    el.addEventListener("pointerleave", hideTip);
+    el.setAttribute("aria-label", rows.map(([k, v]) => `${k}: ${v}`).join("; "));
+    return el;
+  }
   function updateRunHeader(run) {
-    document.getElementById("run-title").textContent = run.id;
-    const agent = run.config && run.config.agent ? `${run.config.agent.runtime} / ${run.config.agent.model || "default"}` : "";
-    const gp = (run.config && run.config.gpus) || [];
-    const hw = run.config && run.config.hw && run.config.hw.gpu ? run.config.hw.gpu : "";
-    document.getElementById("run-meta").textContent =
-      `${run.task} · ${agent} · ${gp.length ? `GPU ${gp.join(", ")}${hw ? ` (${hw})` : ""}` : "CPU"}`;
+    const cfg = run.config || {};
+    const agent = cfg.agent || {};
+    const title = document.getElementById("run-title");
+    title.textContent = run.id;
+    if (!title.dataset.tip) {
+      title.dataset.tip = "1";
+      hoverTip(title, [["Run", run.id], ["Path", cfg.path, true]]);
+    }
+    const kv = (k, v, rows) => (v ? hoverTip(h("span", { class: "kv" }, h("span", { class: "k", text: T(k) }),
+      h("span", { class: "v", text: v })), rows) : null);
+    const [name, about] = RUNTIMES[agent.runtime] || [agent.runtime];
+    const used = [...new Set(run.blocks.map((b) => b.model).filter(Boolean))].join(", ");
+    const model = ["Model", agent.model || "the agent's default"];
+    // rebuilt only when what they say changes, so a chip under the pointer stays put
+    const meta = document.getElementById("run-meta");
+    const train = cfg.train_s ? (cfg.train_s >= 600 ? fmtDur(cfg.train_s) : `${Math.round(cfg.train_s)} s`) : "";
+    const key = JSON.stringify([S.ws, run.task, cfg.task_title, cfg.task_path, train, agent, used]);
+    if (meta.dataset.key !== key) {
+      meta.dataset.key = key;
+      meta.replaceChildren(...[
+        kv("metaWorkspace", S.ws.name, [["Workspace", S.ws.name], ["Path", S.ws.path, true]]),
+        kv("metaTask", run.task, [["Task", run.task], ["Problem", cfg.task_title], ["Path", cfg.task_path, true]]),
+        kv("metaTrain", train, [["Train wall", `${train} of wall clock per evaluation`],
+          ["", "each candidate trains this long at most; fixed by the task (TRAIN_TIME)"]]),
+        kv("metaAgent", agent.runtime, [["Agent", name], ["", about], model, ["Models used", used]]),
+        kv("metaModel", agent.model, [model, ["Models used", used]])].filter(Boolean));
+    }
     document.getElementById("run-status").replaceChildren(statusEl(run.live ? "running" : run.status));
   }
 
@@ -490,14 +594,15 @@
     const host = document.getElementById("run-tiles");
     if (!host.children.length) {
       host.append(tile("t-best", T("best")), tile("t-anchor", T("anchor")), tile("t-evals", T("evals")),
-        tile("t-gpu", timeLabel(run)), tile("t-cost", T("cost")));
+        tile("t-gpu", T("gpuTime")), tile("t-cpu", T("cpuTime")), tile("t-cost", T("cost")));
       host.firstChild.classList.add("hero");
     }
     const q = (id, sel) => document.querySelector(`#${id} ${sel}`);
     tween(q("t-best", ".value"), run.best, fmtScore);
     const ratio = run.best && run.anchor ? run.anchor / run.best : null;
     q("t-best", ".note").replaceChildren(ratio && ratio > 1.0001
-      ? h("span", { class: "delta-good", text: `▲ ${T("vsAnchor", ratio.toFixed(ratio >= 10 ? 0 : 1))}` })
+      ? h("span", { class: "delta-good", text: T("betterBy", ratio.toFixed(ratio >= 10 ? 0 : 1)),
+        title: T("vsAnchor", ratio.toFixed(ratio >= 10 ? 0 : 1)) })
       : h("span", { text: run.best_block ? run.best_block : "" }));
     if (prev && run.best != null && prev.best != null && run.best < prev.best && !reduced) {
       const t = document.getElementById("t-best");
@@ -508,10 +613,18 @@
     const failed = scored.filter((e) => e.rRMSE == null).length;
     tween(q("t-evals", ".value"), scored.length, (v) => String(Math.round(v)));
     q("t-evals", ".note").textContent = failed ? T("errors", failed) : "";
+    // The run's own clock (what its budget is charged in) for the device it
+    // trains on; the other device's time from the evaluations that ran there.
     const spent = run.blocks.filter((b) => b.id !== "b00").reduce((a, b) => a + (b.spent || 0), 0);
     const budget = (run.config.wall_budget_s || 0) * (run.blocks_total || 0);
-    tween(q("t-gpu", ".value"), spent, fmtDur);
-    q("t-gpu", ".note").textContent = budget ? `/ ${fmtDur(budget)}` : "";
+    const onCard = (e) => typeof e.gpu === "number";
+    const elsewhere = scored.filter((e) => e.block !== "b00" && onCard(e) !== onGpu(run))
+      .reduce((a, e) => a + (e.wall_s || 0), 0);
+    const [gpuS, cpuS] = onGpu(run) ? [spent, elsewhere] : [elsewhere, spent];
+    tween(q("t-gpu", ".value"), onGpu(run) || gpuS ? gpuS : null, fmtDur);
+    q("t-gpu", ".note").textContent = onGpu(run) ? (budget ? `/ ${fmtDur(budget)}` : "") : (gpuS ? "" : T("noGpuRun"));
+    tween(q("t-cpu", ".value"), cpuS, fmtDur);
+    q("t-cpu", ".note").textContent = !onGpu(run) && budget ? `/ ${fmtDur(budget)}` : "";
     const cost = run.blocks.reduce((a, b) => a + (b.cost_usd || 0), 0);
     const tokens = run.blocks.reduce((a, b) => a + (b.tokens || 0), 0);
     tween(q("t-cost", ".value"), cost, (v) => (cost ? `$${v.toFixed(2)}` : "—"));
@@ -520,10 +633,10 @@
 
   // ── score chart ──
   function renderScoreChart(host, run, prev) {
-    const W = Math.max(320, host.clientWidth || 800);
-    const H = fitted(host) ? Math.max(200, host.clientHeight || 300) : 300;
-    const m = { l: 56, r: 16, t: 22, b: 34 };
-    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    // in the one-screen grid the chart takes exactly the room it is given
+    const fit = fitted(host);
+    const W = Math.max(fit ? 200 : 320, host.clientWidth || 800);
+    const H = fit ? Math.max(100, host.clientHeight || 300) : 300;
     const evs = run.evals.filter((e) => !e.diag);
     const pts = evs.filter((e) => e.rRMSE != null && e.rRMSE > 0);
     const svg = s("svg", { class: "chart", viewBox: `0 0 ${W} ${H}`, role: "img",
@@ -537,6 +650,16 @@
     let lo = Math.log10(Math.min(...vals)), hi = Math.log10(Math.max(...vals));
     lo = Math.floor((lo - 0.08) * 2) / 2; hi = Math.ceil((hi + 0.04) * 2) / 2;
     if (hi - lo < 0.5) { lo -= 0.25; hi += 0.25; }
+    // ticks at decades and half-decades; the left margin fits the widest
+    // label and, beside it, the y-axis title turned on its side
+    const charW = 7.2;  // about 0.6em at the small type size
+    const ticks = [];
+    for (let d = Math.ceil(lo * 2) / 2; d <= hi + 1e-9; d += 0.5) {
+      const v = Math.pow(10, d);
+      ticks.push([v, fmtScore(Number(v.toPrecision(2)))]);
+    }
+    const m = { l: 24 + Math.max(4, ...ticks.map(([, t]) => t.length)) * charW + 8, r: 16, t: 22, b: 34 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
     const x = (v) => m.l + (v / maxX) * iw;
     const y = (v) => m.t + ((hi - Math.log10(v)) / (hi - lo)) * ih;
 
@@ -547,16 +670,16 @@
       if (!last || last.block !== e.block) blockSpans.push({ block: e.block, x0: (e.cum_wall || 0) - (e.wall_s || 0), x1: e.cum_wall || 0 });
       else last.x1 = e.cum_wall || 0;
     }
+    // a band's label sits over it, or is left out when the band has no room
     blockSpans.forEach((b, i) => {
-      if (i % 2 === 1) svg.append(s("rect", { class: "band", x: x(Math.max(0, b.x0)), y: m.t, width: Math.max(0, x(b.x1) - x(Math.max(0, b.x0))), height: ih }));
-      const cx = (x(Math.max(0, b.x0)) + x(b.x1)) / 2;
-      if (x(b.x1) - x(Math.max(0, b.x0)) > 26) svg.append(s("text", { class: "band-label", x: cx, y: m.t - 8, "text-anchor": "middle", text: b.block }));
+      const x0 = x(Math.max(0, b.x0)), x1 = x(b.x1);
+      if (i % 2 === 1) svg.append(s("rect", { class: "band", x: x0, y: m.t, width: Math.max(0, x1 - x0), height: ih }));
+      if (x1 - x0 > 26 && x1 - x0 >= b.block.length * charW) svg.append(s("text", { class: "band-label", x: (x0 + x1) / 2, y: m.t - 8, "text-anchor": "middle", text: b.block }));
     });
-    // grid + ticks (decades and half-decades)
-    for (let d = Math.ceil(lo * 2) / 2; d <= hi + 1e-9; d += 0.5) {
-      const v = Math.pow(10, d), yy = y(v);
+    for (const [v, label] of ticks) {
+      const yy = y(v);
       svg.append(s("line", { class: "gridline", x1: m.l, x2: W - m.r, y1: yy, y2: yy }),
-        s("text", { class: "tick", x: m.l - 8, y: yy + 4, "text-anchor": "end", text: fmtScore(Number(v.toPrecision(2))) }));
+        s("text", { class: "tick", x: m.l - 8, y: yy + 4, "text-anchor": "end", text: label }));
     }
     svg.append(s("line", { class: "axis", x1: m.l, x2: W - m.r, y1: m.t + ih, y2: m.t + ih }));
     const step = niceStep(maxX / 6);
@@ -564,7 +687,8 @@
       svg.append(s("text", { class: "tick", x: x(v), y: H - m.b + 16, "text-anchor": "middle", text: fmtDur(v) }));
     }
     svg.append(s("text", { class: "axis-label", x: W - m.r, y: H - 4, "text-anchor": "end", text: `${timeLabel(run)} →` }));
-    svg.append(s("text", { class: "axis-label", x: 4, y: 12, text: "rRMSE (log)" }));
+    svg.append(s("text", { class: "axis-label", x: 0, y: 0, transform: `translate(12 ${m.t + ih / 2}) rotate(-90)`,
+      "text-anchor": "middle", "dominant-baseline": "central", text: T("yTitle") }));
     // anchor
     if (run.anchor) {
       const ya = y(run.anchor);
@@ -663,12 +787,12 @@
   }
 
   // ── predicted field ──
-  function colormap(diverging) {
-    const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
-    const mid = css("--surface-2").startsWith("#") ? css("--surface-2") : "#f0efec";
-    const stops = diverging
-      ? ["#104281", "#3987e5", "#9ec5f4", mid, "#f2a5a0", "#e34948", "#9d2b2a"].map(hex)
-      : ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"].map(hex);
+  // Turbo, the replay's map too: a diverging field gets a range centred on zero
+  // (drawPanel), so zero sits at its middle either way.
+  const TURBO = ["#30123B", "#4145AB", "#4675ED", "#39A2FC", "#1BCFD4", "#24ECA6", "#61FC6C", "#A4FC3B",
+    "#D1E834", "#F3C63A", "#FE9B2D", "#F36315", "#D93807", "#B11901", "#7A0403"];
+  function colormap() {
+    const stops = TURBO.map((c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)));
     const lut = new Uint8ClampedArray(256 * 3);
     for (let i = 0; i < 256; i++) {
       const f = (i / 255) * (stops.length - 1), k = Math.min(stops.length - 2, Math.floor(f)), u = f - k;
@@ -747,27 +871,34 @@
       this.grid_el = h("div", { class: "panels" });
       this.box = h("div", { class: "canvas-box" }, this.grid_el);
       this.slider = h("input", { type: "range", min: "0", max: "0", value: "0", "aria-label": T("field"),
-        oninput: () => { this.follow = false; this.show(Number(this.slider.value)); } });
-      this.playBtn = h("button", { class: "btn", type: "button", onclick: () => this.toggle() }, T("play"));
-      this.latestBtn = h("button", { class: "btn", type: "button", onclick: () => { this.follow = true; this.show(this.frames.length - 1); } }, T("latest"));
+        // dragged to the end, the slider follows new frames again
+        oninput: () => { const i = Number(this.slider.value); this.follow = i === this.frames.length - 1; this.show(i); } });
+      this.playBtn = h("button", { class: "btn", type: "button", title: T("play"), "aria-label": T("play"),
+        onclick: () => this.toggle() }, "▶");
       this.stepSel = h("input", { type: "range", min: "0", max: "0", value: "0", hidden: true,
         oninput: () => { this.step = Number(this.stepSel.value); this.draw(); } });
       this.stepLabel = h("span", { class: "muted" });
       this.stepRow = h("div", { class: "controls step", hidden: true }, this.stepLabel, this.stepSel);
-      host.replaceChildren(this.caption, this.box,
-        h("div", { class: "controls" }, this.playBtn, this.slider, this.latestBtn), this.stepRow);
+      this.tools = document.getElementById("field-tools") || h("div", { class: "controls" });
+      this.tools.replaceChildren(this.playBtn, this.slider);
+      host.replaceChildren(this.caption, this.box, ...(this.tools.isConnected ? [] : [this.tools]), this.stepRow);
     }
     stop() { clearInterval(this.timer); this.playing = false; }
+    mode(next) {  // what the play button does next
+      this.playBtn.textContent = next === "play" ? "▶" : "❚❚";
+      this.playBtn.title = T(next);
+      this.playBtn.setAttribute("aria-label", T(next));
+    }
     toggle() {
-      if (this.playing) { this.stop(); this.playBtn.textContent = T("play"); return; }
+      if (this.playing) { this.stop(); this.mode("play"); return; }
       this.playing = true;
       this.follow = false;
-      this.playBtn.textContent = T("pause");
+      this.mode("pause");
       let i = 0;
       this.show(0);
       this.timer = setInterval(() => {
         i += 1;
-        if (i >= this.frames.length) { this.stop(); this.playBtn.textContent = T("play"); this.follow = true; return; }
+        if (i >= this.frames.length) { this.stop(); this.mode("play"); this.follow = true; return; }
         this.show(i);
       }, 900);
     }
@@ -776,7 +907,7 @@
       const changed = fresh.length !== this.frames.length;
       this.frames = fresh;
       this.slider.max = String(Math.max(0, fresh.length - 1));
-      document.getElementById("field-aside").textContent = fresh.length ? `${fresh.length}` : "";
+      this.tools.hidden = !fresh.length;
       this.host.classList.toggle("no-frames", !fresh.length);
       if (!fresh.length) {
         this.caption.replaceChildren(h("span", { class: "muted", text: T("noFrames") }));
@@ -877,7 +1008,7 @@
         (q.p.colors === "auto" && lo < 0 && hi > 0 && Math.min(-lo, hi) >= 0.2 * Math.max(-lo, hi));
       if (diverging) { const a = Math.max(Math.abs(lo), Math.abs(hi)) || 1; lo = -a; hi = a; }
       if (hi === lo) hi = lo + 1;
-      const lut = colormap(diverging);
+      const lut = colormap();
       const canvas = panel.canvas;
       const Wp = Math.max(40, Math.round(w * dpr));
       const Hp = Math.max(30, Math.round(h * dpr));
@@ -1029,7 +1160,7 @@
     const block = S.selBlock;
     const key = `${run.id}:${block}`;
     if (!S.feed || S.feed.key !== key) {
-      S.feed = { key, offset: null };
+      S.feed = { key, offset: null, n: 0 };
       host.replaceChildren();
     }
     const q = new URLSearchParams();
@@ -1044,7 +1175,7 @@
     if (first && !data.events.length) host.replaceChildren(h("div", { class: "empty", text: T("noActivity") }));
     if (data.events.length && host.querySelector(".empty")) host.replaceChildren();
     for (const ev of data.events) {
-      const row = h("div", { class: `ev ${ev.kind}${first ? "" : " fresh"}` },
+      const row = h("div", { class: `ev ${ev.kind}${S.feed.n++ % 2 ? " alt" : ""}${first ? "" : " fresh"}` },
         h("span", { class: "k", text: KIND[ev.kind] || "·" }), h("span", { class: "t", text: ev.text }));
       host.append(row);
       if (!first) setTimeout(() => row.classList.remove("fresh"), 50);
@@ -1053,21 +1184,12 @@
     if (first || atBottom) host.scrollTop = host.scrollHeight;
   }
 
-  // ── summary ──
-  async function updateSummary(run) {
-    const host = document.getElementById("run-summary");
-    const blk = run.blocks.find((b) => b.id === S.selBlock);
-    document.getElementById("sum-h").textContent = `${T("summary")}${S.selBlock ? ` · ${S.selBlock}` : ""}`;
-    if (!blk || !blk.summary) { host.replaceChildren(h("div", { class: "empty", text: T("noSummary") })); return; }
-    if (host.dataset.key === `${run.id}:${blk.id}:${run.updated}`) return;
-    const data = await get(`/api/runs/${encodeURIComponent(run.id)}/summary/${blk.id}`);
-    host.dataset.key = `${run.id}:${blk.id}:${run.updated}`;
-    host.replaceChildren(markdown(data.markdown));
-  }
-
   function renderEvalTable(host, run) {
-    const rows = run.evals.slice(-40).reverse().map((e) =>
-      h("tr", {}, h("td", { text: e.block }), h("td", { text: e.candidate }),
+    document.getElementById("evals-aside").textContent = run.evals.length ? String(run.evals.length) : "";
+    const rows = run.evals.slice(-200).reverse().map((e) =>
+      h("tr", { class: `clickable${e.block === S.selBlock ? " sel" : ""}`, title: e.error ? `✕ ${e.error}` : relTime(e.ts),
+        onclick: () => { S.selBlock = e.block; refresh(); } },
+        h("td", { text: e.block }), h("td", { class: "cand", text: e.candidate, title: e.candidate }),
         h("td", { class: "num", text: e.diag ? "diag" : fmtScore(e.rRMSE) }),
         h("td", { class: "num", text: e.wall_s != null ? String(Math.round(e.wall_s)) : "—" }),
         h("td", { text: e.error ? `✕ ${e.error.slice(0, 80)}` : relTime(e.ts) })));
@@ -1095,7 +1217,7 @@
   }
   function markdown(src) {
     const root = h("div");
-    const lines = String(src || "").split("\n");
+    const lines = String(src || "").split(/\r?\n/);
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
@@ -1157,14 +1279,14 @@
           h("span", { id: "task-state" })),
         h("div", { id: "task-ready" }),
         h("div", { class: "grid-2" },
-          h("section", { class: "card" }, h("h2", {}, T("stages"), h("span", { class: "aside", id: "task-mode" })),
+          h("section", { class: "card" }, h("h2", {}, icon("authoring"), T("stages"), h("span", { class: "aside", id: "task-mode" })),
             h("div", { id: "task-steps", class: "stepper" })),
-          h("section", { class: "card" }, h("h2", {}, T("reference")), h("div", { id: "task-ref" }))),
+          h("section", { class: "card" }, h("h2", {}, icon("reference"), T("reference")), h("div", { id: "task-ref" }))),
         h("div", { class: "grid-2 even" },
-          h("section", { class: "card scroll" }, h("h2", {}, T("authorAgent")), h("div", { id: "task-feed", class: "feed" })),
-          h("section", { class: "card scroll" }, h("h2", {}, T("problem")), h("div", { id: "task-problem", class: "md" }))),
+          h("section", { class: "card scroll" }, h("h2", {}, icon("agent"), T("authorAgent")), h("div", { id: "task-feed", class: "feed" })),
+          h("section", { class: "card scroll" }, h("h2", {}, icon("problem"), T("problem")), h("div", { id: "task-problem", class: "md" }))),
       );
-      S.feed = { key: `task:${name}`, offset: null };
+      S.feed = { key: `task:${name}`, offset: null, n: 0 };
     }
     document.getElementById("task-title").textContent = t.title || "";
     document.getElementById("task-state").replaceChildren(statusEl(t.ready ? "ready" : ((t.authoring || {}).status === "failed" ? "failed" : "running")));
@@ -1259,7 +1381,7 @@
     if (first && !data.events.length) host.replaceChildren(h("div", { class: "empty", text: T("noActivity") }));
     if (data.events.length && host.querySelector(".empty")) host.replaceChildren();
     for (const ev of data.events) {
-      host.append(h("div", { class: `ev ${ev.kind}` }, h("span", { class: "k", text: KIND[ev.kind] || "·" }),
+      host.append(h("div", { class: `ev ${ev.kind}${S.feed.n++ % 2 ? " alt" : ""}` }, h("span", { class: "k", text: KIND[ev.kind] || "·" }),
         h("span", { class: "t", text: ev.text })));
     }
     host.scrollTop = host.scrollHeight;
@@ -1288,7 +1410,13 @@
   // a stream that dies silently still gets a refresh every few seconds
   if (!window.__PF_STATIC__) setInterval(() => { if (!document.hidden) refresh(); }, 15000);
 
-  get("/api/ping").then((p) => { document.getElementById("ws-name").textContent = p.workspace; }).catch(() => {});
+  // what replay.js draws with: the API and this page's own field renderers
+  window.PF = { get, field: { resolveView, panelValues, drawTensor, drawSplat, drawLine } };
+
+  get("/api/ping").then((p) => {
+    S.ws = { name: p.workspace || "", path: p.path || "" };
+    if (S.run && document.getElementById("run-meta")) updateRunHeader(S.run);
+  }).catch(() => {});
   connect();
   route();
 })();

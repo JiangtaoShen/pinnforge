@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "logline": "Five blocks took Kolmogorov flow from worse than predicting nothing (1.063) to 0.0412: first an honest residual, then the capacity to use it, then knowing when the loss had stopped ranking fields.",
+  "blocks": {
+    "b00": {
+      "headline": "b00 — control: the KF baseline, measured as it is (1.063)",
+      "thrust": "No design work: the task's plain-MLP PINN, trained once for its full wall clock at seed 0. It is the yardstick every later block is measured against.",
+      "tags": ["baseline", "as-is"],
+      "findings": [
+        "The baseline scores above 1.0: predicting u = v = 0 everywhere would do better, so the network is worse than predicting nothing."
+      ],
+      "cited": [],
+      "candidates": {"b00_v01": "the baseline, unchanged"}
+    },
+    "b01": {
+      "headline": "b01 — separable PINN, causal weighting and SOAP: 1.063 → 0.840",
+      "thrust": "Forked from the baseline rather than tuned on it: b00 showed a structural failure, a field pinned to its initial condition, so tuning the plain MLP was pointless. Five changes went in together: a separable velocity-vorticity network, a periodic embedding, a hard initial condition, causal weighting and the SOAP optimiser.",
+      "tags": ["separable", "causal", "SOAP", "rank"],
+      "findings": [
+        "A pseudo-spectral surrogate of the same flow, built as a diagnostic, was the block's most useful product: it shows where the error lives.",
+        "The error is a propagation failure: the field is right near t = 0 and drifts away later.",
+        "The residual does not single out the true solution: the trained network's residual is far lower than the true field's."
+      ],
+      "cited": ["T-012", "T-084", "T-108"],
+      "candidates": {
+        "b01_spinn_vv": "separable VV-PINN, hard IC, causal",
+        "b01_causal": "causal ε 1 → 50",
+        "b01_curric": "growing time window",
+        "b01_rank": "CP rank 128 → 320"
+      }
+    },
+    "b02": {
+      "headline": "b02 — a weak (Fourier-Galerkin) residual in the velocity norm: 0.840 → 0.131",
+      "thrust": "Forked from b01's champion idea, not its code. b01 had measured that the trained network's residual beats the true solution's, and then kept tuning; b02 read that as the residual being wrong and replaced the pointwise vorticity residual with its Fourier-Galerkin form, measured in the velocity norm.",
+      "tags": ["weak form", "residual", "causal", "surrogate"],
+      "findings": [
+        "The residual was the bug, and it is fixable: the weak form in the velocity norm cut the error by a factor of six.",
+        "The test space must be complete: too few Fourier modes leave most of the grid's degrees of freedom unconstrained.",
+        "With an honest residual, causal weighting stops being a workaround and pays off again."
+      ],
+      "cited": ["T-010", "T-070", "T-084"],
+      "candidates": {
+        "b02_psi": "stream function, strong residual",
+        "b02_weak": "weak residual, K_T 16",
+        "b02_wk64": "K_T 16 → 64 (all resolved modes)",
+        "b02_hm2": "norm weight 1/k → 1/k²"
+      }
+    },
+    "b03": {
+      "headline": "b03 — CP rank and the ε·NT gate: 0.131 → 0.0416",
+      "thrust": "Forked from b02's champion. b02 fixed the residual's formulation but left the network small, on the view that capacity was not the problem. b03 tested that directly with a rank sweep, and separated the causal gate's strength from its nominal ε.",
+      "tags": ["rank", "causal gate", "precond"],
+      "findings": [
+        "CP rank was the binding constraint: b02's advice not to buy capacity was wrong.",
+        "The causal gate's strength is ε·NT, not ε: change the time slices and the gate changes with them.",
+        "Faster steps bought nothing: two clean throughput wins left the score where it was."
+      ],
+      "cited": ["T-010", "T-084", "T-108"],
+      "candidates": {
+        "b03_r768": "CP rank 384 → 768",
+        "b03_r1536": "CP rank 1536",
+        "b03_r2048": "CP rank 2048",
+        "b03_scan": "training chunk in one jitted loop"
+      }
+    },
+    "b04": {
+      "headline": "b04 — the weak residual has stopped ranking fields: 0.0416 → 0.0412",
+      "thrust": "Forked from b03's champion. The score moved by less than seed noise; the block's product is a diagnosis. It measured whether a lower weak residual still meant a better field, and ruled out the cheaper explanations one by one.",
+      "tags": ["diagnosis", "Tucker", "seed noise"],
+      "findings": [
+        "The gain is within seed noise: a second seed of the same two candidates spans 0.0424–0.0428.",
+        "The decisive measurement: at this level the weak residual no longer ranks fields by their error.",
+        "Aliasing, quadrature and capacity were each excluded with one cheap experiment."
+      ],
+      "cited": ["T-011", "T-052", "T-130"],
+      "candidates": {
+        "b04_tuck": "CP → Tucker core [64, 64, 64]",
+        "b04_w128": "width 64 → 128",
+        "b04_fix": "deterministic (t, x, y) lattice"
+      }
+    }
+  }
+}

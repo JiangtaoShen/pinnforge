@@ -512,6 +512,12 @@ def run_detail(root: Path, run_id: str) -> dict:
             "hw": _hw(cfg),
             "task": _str(cfg.get("task")),
             "blocks": _int(cfg.get("blocks")),
+            # what the header's chips show on hover
+            "path": str(run),
+            "task_title": _problem_title(run / "task" / "problem.md"),
+            "train_s": _train_time(run),
+            "task_path": str(task_dir) if NAME.fullmatch(_str(cfg.get("task"))) and (
+                task_dir := Path(root) / "tasks" / _str(cfg.get("task"))).is_dir() else "",
         },
         "blocks": blocks,
         "evals": evals,
@@ -753,16 +759,28 @@ def _authoring_status(task_dir: Path) -> dict | None:
     return data
 
 
-def task_summary(root: Path, task_dir: Path) -> dict:
-    from pinnforge.task import authoring
+def _train_time(run: Path) -> float | None:
+    """How long each evaluation trains: the task's frozen `TRAIN_TIME`, from its `eval.py`."""
+    from pinnforge.task import contract
+
+    value = contract.train_time_in(_read_text(run / "task" / "eval.py") or "")
+    return value if value is not None and math.isfinite(value) and value > 0 else None
+
+
+def _problem_title(problem_md: Path) -> str:
+    """The title line of a `problem.md`, without its `#`."""
     from pinnforge.ui import feeds
 
+    problem = _read_text(problem_md, 4000)
+    first = problem.splitlines()[0] if problem and problem.splitlines() else ""
+    return feeds.redact(first.lstrip("# ").strip())[:200]
+
+
+def task_summary(root: Path, task_dir: Path) -> dict:
+    from pinnforge.task import authoring
+
     st = _authoring_status(task_dir)
-    title = ""
-    problem = _read_text(task_dir / "problem.md", 4000)
-    if problem:
-        first = problem.splitlines()[0] if problem.splitlines() else ""
-        title = feeds.redact(first.lstrip("# ").strip())[:200]
+    title = _problem_title(task_dir / "problem.md")
     anchor = _dict(_json(task_dir / ".anchor" / "meta.json"))
     out = {
         "name": task_dir.name,

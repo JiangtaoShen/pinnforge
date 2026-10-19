@@ -83,7 +83,8 @@ def _get(url, method="GET", headers=None):
 ENDPOINTS = [
     "/api/ping", "/api/overview", "/api/gpus", "/api/runs/toy_1", "/api/runs/toy_1/summary/b01",
     "/api/runs/toy_1/summary/b02", "/api/runs/toy_1/activity", "/api/runs/toy_1/activity?block=b02",
-    "/api/runs/toy_1/frame/0", "/api/tasks/toy", "/api/tasks/toy/activity", "/", "/app.js",
+    "/api/runs/toy_1/frame/0", "/api/tasks/toy", "/api/tasks/toy/activity",
+    "/", "/app.js", "/replay.js", "/fonts.css",
 ]
 
 
@@ -203,9 +204,12 @@ def test_a_report_is_self_contained_and_leaks_nothing(ws):
 
     html = report.render(ws, "toy_1")
     assert "<script src=" not in html and 'href="app.css"' not in html, "nothing fetched"
+    assert "url('fonts/" not in html and 'src="colalab.png"' not in html
     assert "__PF_SNAPSHOT__" in html and '"/api/runs/toy_1"' in html
     assert CANARY not in html
     assert "</script><script>alert" not in html  # agent text cannot close the data script
+    here = json.dumps(str(ws / "runs" / "toy_1"))[1:-1]
+    assert here not in html, "where the run lives on this machine stays here"
 
 
 def test_chat_finds_the_plugin():

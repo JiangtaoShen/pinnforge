@@ -353,7 +353,10 @@ def test_only_whitelisted_config_is_served(ws):
         f"hw: {{gpu: A100, nested: {{x: {CANARY}}}}}\n"
         f"reference: {CANARY}\nsecret_env: {CANARY}\n", encoding="utf-8")
     d = api.run_detail(ws, "toy_1")
-    assert set(d["config"]) == {"agent", "gpus", "wall_budget_s", "hw", "task", "blocks"}
+    assert set(d["config"]) == {"agent", "gpus", "wall_budget_s", "hw", "task", "blocks",
+                                "path", "task_title", "task_path", "train_s"}
+    assert d["config"]["path"] == str(ws / "runs" / "toy_1")
+    assert d["config"]["task_path"] == str(ws / "tasks" / "toy")
     assert d["config"]["agent"] == {"runtime": "claude_code", "model": "m"}
     assert d["config"]["gpus"] == [0, 2] and d["config"]["hw"] == {"gpu": "A100"}
     assert d["config"]["task"] == "toy" and d["config"]["blocks"] == 2
@@ -361,8 +364,9 @@ def test_only_whitelisted_config_is_served(ws):
     (ws / "runs" / "toy_1" / "run.yaml").write_text(
         "agent: [1]\nsandbox: 5\nblocks: x\nhw: [1]\ntask: {a: 1}\n", encoding="utf-8")
     d = api.run_detail(ws, "toy_1")
-    assert d["config"] == {"agent": {"runtime": "", "model": ""}, "gpus": [],
-                           "wall_budget_s": 0.0, "hw": {}, "task": "", "blocks": 0}
+    assert {k: v for k, v in d["config"].items() if k != "path"} == {
+        "agent": {"runtime": "", "model": ""}, "gpus": [], "wall_budget_s": 0.0, "hw": {},
+        "task": "", "blocks": 0, "task_title": "", "task_path": "", "train_s": None}
 
 
 # ─────────────────────────────── frames ───────────────────────────────
@@ -483,12 +487,17 @@ def test_a_report_escapes_every_markup_character_in_its_data(ws):
     (run / "blocks" / "b01" / "evals.jsonl").write_text(json.dumps(
         {"ts": "t", "rRMSE": 0.3, "candidate": f"blocks/b01/{nasty}.py",
          "error": nasty}) + "\n", encoding="utf-8")
-    html = report.render(ws, "toy_1")
+    from pinnforge.ui import story
+
+    # a film carries the summary's title too, as its headline
+    html = report.render(ws, "toy_1", film=story.build(ws, "toy_1"))
     start = html.index("window.__PF_SNAPSHOT__ = ") + len("window.__PF_SNAPSHOT__ = ")
     data = html[start: html.index(";\n", start)]
     assert not set(data) & set("<>&")
     snap = json.loads(data)
-    assert nasty in snap["/api/runs/toy_1/summary/b01"]["markdown"]
+    assert nasty in snap["/api/runs/toy_1"]["evals"][0]["error"], "agent text, intact"
+    film = snap["/api/runs/toy_1/story"]
+    assert any(nasty in b["headline"] for b in film["blocks"]), "the summary's title, intact"
     assert report.script_json("<&>") == '"\\u003c\\u0026\\u003e"'
 
 

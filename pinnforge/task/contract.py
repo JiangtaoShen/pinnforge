@@ -772,7 +772,12 @@ def _check_agreement(
 
 def train_time(task_dir: Path) -> float | None:
     """Per-run wall in seconds, read from `eval.py`'s frozen-header literal."""
-    m = _TRAIN_TIME_LITERAL.search((task_dir / "eval.py").read_text(encoding="utf-8"))
+    return train_time_in((task_dir / "eval.py").read_text(encoding="utf-8"))
+
+
+def train_time_in(evalsrc: str) -> float | None:
+    """The per-run wall an `eval.py` source declares, in seconds."""
+    m = _TRAIN_TIME_LITERAL.search(evalsrc)
     if not m:
         return None
     try:

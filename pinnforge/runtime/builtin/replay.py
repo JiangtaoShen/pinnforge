@@ -237,9 +237,29 @@ def agent(block: str) -> int:
     return 0
 
 
+def film() -> int:
+    """A discovery-film session (`PINNFORGE_ROLE=film`): the script is the draft, unedited.
+
+    A scripted agent has no judgment to add to what the summaries say, so the
+    demo's film is told in the words the draft extracted from them.
+    """
+    here = Path.cwd()
+    started = time.time()
+    _say("system", subtype="init", model="replay-1", session_id=None)
+    _tool("Read", file_path="draft.json")
+    text = (here / "draft.json").read_text(encoding="utf-8")
+    (here / "script.json").write_text(text, encoding="utf-8", newline="\n")
+    _tool("Write", file_path="script.json")
+    _text("script.json: the draft as it stands — a scripted agent has nothing to add")
+    _say("result", num_turns=2, total_cost_usd=0.0, duration_ms=int(1000 * (time.time() - started)),
+         usage={"input_tokens": 0, "output_tokens": 0})
+    return 0
+
+
 if __name__ == "__main__":
     import argparse
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--block", required=True)
-    raise SystemExit(agent(ap.parse_args().block))
+    block = ap.parse_args().block
+    raise SystemExit(film() if os.environ.get("PINNFORGE_ROLE") == "film" else agent(block))

@@ -45,9 +45,13 @@ from pinnforge.ui import api, safe
 
 STATIC = Path(__file__).resolve().parent / "static"
 PAGES = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js",
-         "/app.css": "app.css", "/favicon.svg": "favicon.svg"}
+         "/app.css": "app.css", "/favicon.svg": "favicon.svg", "/replay.js": "replay.js",
+         "/fonts.css": "fonts.css", "/colalab.png": "colalab.png", "/gpu.svg": "gpu.svg",
+         # the packaged typefaces, by name: a fixed list, never a path from the request
+         **{f"/fonts/{p.name}": f"fonts/{p.name}" for p in (STATIC / "fonts").glob("*.woff2")}}
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
-         ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
+         ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
+         ".woff2": "font/woff2"}
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
        "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; "
        "frame-ancestors 'none'")
@@ -228,7 +232,8 @@ class Handler(BaseHTTPRequestHandler):
 
         match parts:
             case ["ping"]:
-                return {"app": "pinnforge", "version": __version__, "workspace": root.name}
+                return {"app": "pinnforge", "version": __version__, "workspace": root.name,
+                        "path": str(root)}
             case ["overview"]:
                 return api.overview(root)
             case ["gpus"]:

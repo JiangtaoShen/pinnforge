@@ -318,17 +318,53 @@ def cmd_drive(args) -> int:
     # cannot open a fresh score cap by filing under a block id of its choosing.
     dispatch = scoring.Dispatch()
     try:
-        # The daemon has to be up before the anchor is measured: measuring runs
-        # eval.py, and eval.py files a score request like any other evaluation.
-        with scoring.serving(root, run, dispatch=dispatch) as server:
-            return _execute(args, run, cfg, lock, server=server, dispatch=dispatch)
+        try:
+            # The daemon has to be up before the anchor is measured: measuring
+            # runs eval.py, which files a score request like any evaluation.
+            with scoring.serving(root, run, dispatch=dispatch) as server:
+                rc = _execute(args, run, cfg, lock, server=server, dispatch=dispatch)
+        finally:
+            lifecycle.release_claim(cfg.sandbox.gpus)  # the film needs no card
+        _film_after(root, run)
+        return rc
     except KeyboardInterrupt:
         print("\ninterrupted — state checkpointed; resume with:")
         print(f"  pinnforge run resume {run.name}")
         return 130
     finally:
-        lifecycle.release_claim(cfg.sandbox.gpus)
         lock.release()
+
+
+def _film_after(root: Path, run: Path) -> None:
+    """A run that finished gets its discovery film, its own agent writing the script.
+
+    Best effort, under the run's lock: the run is done whether or not its film
+    could be made, and `pinnforge run film <id>` makes it again.
+    """
+    _, cfg, state = layout.load_run(run.name, root)
+    if not cfg.film or state.status != "finished":
+        return
+    from pinnforge import discovery
+
+    print(f"discovery film: {cfg.agent.runtime} is writing its script ...")
+    try:
+        film = discovery.make(root, run, cfg.agent)
+    except KeyboardInterrupt:
+        print(f"discovery film interrupted; make it with: pinnforge run film {run.name}")
+        return
+    except Exception as e:  # the run itself is done
+        logging.getLogger(__name__).warning("the discovery film could not be made",
+                                            exc_info=True)
+        print(f"discovery film not made ({e}); try: pinnforge run film {run.name}")
+        return
+    _film_said(film)
+
+
+def _film_said(film) -> None:
+    how = "the agent's script" if film.scripted_by == "agent" else "the draft script"
+    print(f"discovery film: {film.path} ({how})")
+    for p in film.problems:
+        print(f"  {p}")
 
 
 def _execute(args, run, cfg, lock=None, server=None, dispatch=None) -> int:
@@ -623,6 +659,25 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_film(args) -> int:
+    """Make a run's discovery film again: its agent rewrites the script, or, with
+    `--render-only`, the script already written is rendered again."""
+    from pinnforge import discovery
+
+    root = paths.project_root()
+    run, cfg, _ = layout.load_run(args.run_id, root)
+    if args.render_only:
+        if not (run / discovery.PACKAGE / "facts.json").is_file():
+            print(f"{run.name} has no film package yet; make one with: "
+                  f"pinnforge run film {run.name}")
+            return 1
+        _film_said(discovery.render(root, run))
+        return 0
+    print(f"discovery film: {cfg.agent.runtime} is writing its script ...")
+    _film_said(discovery.make(root, run, cfg.agent, timeout_s=args.timeout * 60))
+    return 0
+
+
 def cmd_show(args) -> int:
     run, _, _ = layout.load_run(args.run_id)
     path = paths.evals_path(run, args.block)
@@ -700,6 +755,13 @@ def register(sub) -> None:
     rp.add_argument("run_id")
     rp.add_argument("-o", "--output", default=None, help="default: <run>-report.html")
     rp.set_defaults(func=cmd_report)
+
+    fm = s.add_parser("film", help="make a run's discovery film again (runs/<id>/discovery.html)")
+    fm.add_argument("run_id")
+    fm.add_argument("--render-only", action="store_true",
+                    help="render the script already written, without an agent")
+    fm.add_argument("--timeout", type=float, default=45, help="minutes the agent may take")
+    fm.set_defaults(func=cmd_film)
 
     lst = s.add_parser("list", help="list runs")
     lst.add_argument("--task", default=None)

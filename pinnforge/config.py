@@ -110,6 +110,9 @@ class RunConfig:
     # The hardware class the pool resolved to when the run was created — what
     # its anchor and its wall-clock-bounded evaluations were measured on.
     hw: dict[str, Any] = field(default_factory=dict)
+    # Once the run is over, its agent writes the discovery film's script
+    # (`pinnforge/discovery.py`); `film: false` leaves that to `pinnforge run film`.
+    film: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -122,6 +125,8 @@ class RunConfig:
         }
         if self.hw:
             out["hw"] = self.hw
+        if not self.film:
+            out["film"] = False
         return out
 
     @classmethod
@@ -134,6 +139,7 @@ class RunConfig:
             stall_minutes=int(d.get("stall_minutes", DEFAULT_STALL_MINUTES)),
             poll_seconds=int(d.get("poll_seconds", DEFAULT_POLL_SECONDS)),
             hw=dict(d.get("hw") or {}),
+            film=d.get("film", True) is not False,
         )
 
     def save(self, path: Path) -> None:

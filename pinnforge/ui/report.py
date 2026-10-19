@@ -1,10 +1,11 @@
 """`pinnforge run report` — one run as a single, self-contained HTML file.
 
 The dashboard's own page, with the answers to every request it would make
-embedded in it: the run's detail, every block summary, the agents' activity,
-every archived prediction frame. Opened from disk, attached to an e-mail or
-dropped into a chat, it renders exactly as the live page did — charts, field
-animation and all — with no server behind it.
+embedded in it: the run's detail, the agents' activity, every archived
+prediction frame. Opened from disk, attached to an e-mail or dropped into a
+chat, it renders exactly as the live page did — charts, field animation and
+all — with no server behind it. A discovery film (`pinnforge/discovery.py`) is
+the same file with the film's script laid over the facts and opened on it.
 
 Everything embedded went through the same read-only API the live dashboard
 uses, so a report carries nothing the dashboard would not show: never the
@@ -13,9 +14,10 @@ reference, never an error field.
 
 from __future__ import annotations
 
-import contextlib
+import base64
 import html
 import json
+import re
 from pathlib import Path
 
 from pinnforge.ui import api
@@ -47,14 +49,18 @@ window.__PF_STATIC__ = true;
     this.addEventListener = function () {};
     this.close = function () {};
   };
-  if (!location.hash) location.hash = "#/run/" + encodeURIComponent(window.__PF_RUN__);
+  if (!location.hash) {
+    location.hash = "#/run/" + encodeURIComponent(window.__PF_RUN__) + (window.__PF_START__ || "");
+  }
 })();
 """
 
 
-def snapshot(root: Path, run_id: str) -> dict:
+def snapshot(root: Path, run_id: str, film: dict | None = None) -> dict:
     api.ROOT_REAL = str(Path(root).resolve())
     detail = api.run_detail(root, run_id)
+    # a report travels: where the run lives on this machine stays here
+    detail["config"]["path"] = detail["config"]["task_path"] = ""
     snap: dict[str, object] = {
         "/api/ping": {"app": "pinnforge", "workspace": Path(root).name},
         f"/api/runs/{run_id}": detail,
@@ -65,12 +71,10 @@ def snapshot(root: Path, run_id: str) -> dict:
     overview["gpus"], overview["leases"] = [], {}
     snap["/api/overview"] = overview
     for b in detail["blocks"]:
-        if b["summary"]:
-            with contextlib.suppress(api.NotFound):
-                snap[f"/api/runs/{run_id}/summary/{b['id']}"] = api.summary_md(root, run_id,
-                                                                               b["id"])
         snap[f"/api/runs/{run_id}/activity?block={b['id']}"] = api.activity(root, run_id,
                                                                               b["id"], None)
+    if film is not None:
+        snap[f"/api/runs/{run_id}/story"] = film
     for fr in detail["frames"]:
         try:
             snap[f"/api/runs/{run_id}/frame/{fr['frame']}"] = api.frame(root, run_id, fr["frame"])
@@ -95,19 +99,37 @@ def script_json(value) -> str:
     return text
 
 
-def render(root: Path, run_id: str) -> str:
-    snap = snapshot(root, run_id)
+def _data_uri(path: Path, mime: str) -> str:
+    return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+
+
+def _fonts_inline() -> str:
+    """`fonts.css` with every typeface embedded, so the page looks the same from disk."""
+    css = (STATIC / "fonts.css").read_text(encoding="utf-8")
+    return re.sub(r"url\('(fonts/[\w.-]+\.woff2)'\)",
+                  lambda m: f"url('{_data_uri(STATIC / m.group(1), 'font/woff2')}')", css)
+
+
+def render(root: Path, run_id: str, film: dict | None = None) -> str:
+    """The run's page as one file; with a `film` (`discovery.lay`), its discovery film."""
+    snap = snapshot(root, run_id, film)
     index = (STATIC / "index.html").read_text(encoding="utf-8")
     body = index.split("<body>", 1)[1].split("</body>", 1)[0]
-    body = body.replace('<script src="app.js" defer></script>', "")
-    css = (STATIC / "app.css").read_text(encoding="utf-8")
-    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = _fonts_inline() + "\n" + (STATIC / "app.css").read_text(encoding="utf-8")
+    js = ((STATIC / "replay.js").read_text(encoding="utf-8") + "\n"
+          + (STATIC / "app.js").read_text(encoding="utf-8"))
+    assets = {"colalab": _data_uri(STATIC / "colalab.png", "image/png"),
+              "gpu": _data_uri(STATIC / "gpu.svg", "image/svg+xml")}
     data = script_json(snap)
     return (
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
         f"<title>PINNForge — {html.escape(run_id)}</title>\n<style>\n{css}\n</style>\n"
         f"</head>\n<body>\n{body}\n<script>window.__PF_RUN__ = {script_json(run_id)};\n"
+        f"window.__PF_START__ = {script_json('/replay' if film else '')};\n"
+        f"window.__PF_FILM__ = {script_json(film is not None)};\n"
+        f"window.__PF_ASSETS__ = {script_json(assets)};\n"
         f"window.__PF_SNAPSHOT__ = {data};\n{SHIM}</script>\n<script>\n{js}\n</script>\n"
         "</body>\n</html>\n"
     )
+
