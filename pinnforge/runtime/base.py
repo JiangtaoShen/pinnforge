@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from pinnforge import oscompat
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,7 +79,7 @@ class AgentHandle:
         if self.process is None:
             return None
         try:
-            return os.getpgid(self.process.pid)
+            return oscompat.getpgid(self.process.pid)
         except (ProcessLookupError, PermissionError):
             return None
 
@@ -88,7 +90,7 @@ class AgentHandle:
             fallback()
             return
         try:
-            os.killpg(pgid, sig)
+            oscompat.killpg(pgid, sig)
         except (ProcessLookupError, PermissionError):
             fallback()
 
@@ -106,7 +108,7 @@ class AgentHandle:
         deadline = time.time() + timeout
         while True:
             try:
-                os.killpg(pgid, 0)
+                oscompat.killpg(pgid, 0)
             except (ProcessLookupError, PermissionError):
                 return True
             if time.time() >= deadline:
@@ -127,7 +129,7 @@ class AgentHandle:
                 self.process.wait(timeout=grace)
             except subprocess.TimeoutExpired:
                 logger.warning("block %s ignored SIGTERM; killing group", self.block_id)
-                self._signal_group(pgid, signal.SIGKILL, self.process.kill)
+                self._signal_group(pgid, oscompat.SIGKILL, self.process.kill)
                 self.process.wait(timeout=5)
         if not self._group_gone(pgid, grace):
             logger.warning(
@@ -135,7 +137,7 @@ class AgentHandle:
                 self.block_id,
             )
             with suppress(ProcessLookupError, PermissionError):
-                os.killpg(pgid, signal.SIGKILL)  # type: ignore[arg-type]
+                oscompat.killpg(pgid, oscompat.SIGKILL)  # type: ignore[arg-type]
             if not self._group_gone(pgid, 5.0):
                 logger.error(
                     "block %s: process group %s survived SIGKILL — a run may still "
@@ -158,7 +160,11 @@ class AgentHandle:
         if not self.alive or self.process is None:
             return
         pgid = self._pgid()
-        self._signal_group(pgid, signal.SIGINT, lambda: self.process.send_signal(signal.SIGINT))
+        # Windows cannot send one process SIGINT, and a Ctrl-Break to a process
+        # that leads no group of its own goes to the whole console — this one too.
+        alone = self.process.terminate if oscompat.WINDOWS else (
+            lambda: self.process.send_signal(signal.SIGINT))
+        self._signal_group(pgid, signal.SIGINT, alone)
         try:
             self.process.wait(timeout=grace)
         except subprocess.TimeoutExpired:
@@ -287,20 +293,25 @@ def spawn(
     block_id: str,
     command_prefix: list[str] | None = None,
 ) -> AgentHandle:
-    """Start the CLI in its own process group with stdout teed to `log_path`."""
+    """Start the CLI in its own process group with stdout teed to `log_path`.
+
+    On Windows the group dies with this process (see `oscompat`).
+    """
     if command_prefix:
         cmd = [*command_prefix, *cmd]
+    cmd = oscompat.resolve_command(cmd)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = log_path.open("w", encoding="utf-8", buffering=1)
     logger.info("block %s: %s", block_id, " ".join(cmd))
-    proc = subprocess.Popen(
+    proc = oscompat.popen_group(  # own process group; see AgentHandle.stop()
         cmd,
         cwd=str(cwd),
         env=env,
         stdout=log_file,
         stderr=subprocess.STDOUT,
-        start_new_session=True,  # own process group; see AgentHandle.stop()
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     return AgentHandle(
         block_id=block_id,

@@ -12,11 +12,15 @@ files with the identical released ones, adds `private/`, and drops a cached
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
+# As the session found it: `pinnforge`'s entry point turns UTF-8 mode on for its
+# children on Windows, and a test that runs it must not do so for later tests.
+_PYTHONUTF8 = os.environ.get("PYTHONUTF8")
 NEEDS_LIBRARY = {"test_run", "test_orchestrator", "test_integrity", "test_contract",
                  "test_reuse"}
 
@@ -30,6 +34,53 @@ def _no_operator_config(tmp_path_factory, monkeypatch):
     change what a test sees. Tests that need one set `XDG_CONFIG_HOME` again.
     """
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path_factory.mktemp("xdg")))
+    if _PYTHONUTF8 is None:
+        monkeypatch.delenv("PYTHONUTF8", raising=False)
+
+
+@pytest.fixture
+def symlink():
+    """`symlink(link, target)`: plant a symbolic link, or skip where the system refuses one.
+
+    Windows makes links only with Developer Mode or an elevated shell; what a
+    test plants to prove a link is refused cannot be planted there otherwise.
+    """
+    def make(link: Path, target: Path, target_is_directory: bool = False) -> Path:
+        try:
+            Path(link).symlink_to(target, target_is_directory=target_is_directory)
+        except OSError as e:
+            pytest.skip(f"this system refuses symbolic links ({type(e).__name__})")
+        return Path(link)
+
+    return make
+
+
+def plant_link(link: Path, target: Path) -> Path:
+    """A link at `target`, as a block would plant one where the framework reads.
+
+    A symbolic link where the system allows one. On Windows without the
+    privilege, what a block there can make instead — a hard link to a file,
+    a junction to a directory — neither of which needs any.
+    """
+    link, target = Path(link), Path(target)
+    try:
+        link.symlink_to(target, target_is_directory=target.is_dir())
+    except OSError:
+        if os.name != "nt":
+            raise
+        if target.is_dir():
+            import _winapi
+
+            _winapi.CreateJunction(str(target), str(link))
+        else:
+            os.link(target, link)
+    return link
+
+
+@pytest.fixture
+def plant():
+    """`plant(link, target)`: `plant_link`, for a test to call."""
+    return plant_link
 
 
 def pytest_collection_modifyitems(config, items):

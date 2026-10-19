@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -11,7 +12,15 @@ import time
 
 import pytest
 
+from pinnforge import oscompat
 from pinnforge.run import lifecycle
+
+posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX semantics")
+
+
+def _restore_default_handlers() -> None:
+    for s in oscompat.STOP_SIGNALS:
+        signal.signal(s, signal.default_int_handler if s == signal.SIGINT else signal.SIG_DFL)
 
 
 def test_a_run_has_one_driver(tmp_path):
@@ -39,13 +48,12 @@ def test_a_signal_inside_a_critical_section_waits_for_its_end():
     try:
         reached = []
         with pytest.raises(lifecycle.RunStopped), lifecycle.critical():
-            os.kill(os.getpid(), signal.SIGTERM)
+            signal.raise_signal(signal.SIGTERM)
             time.sleep(0.05)
             reached.append("end of section")
         assert reached == ["end of section"], "the section was not torn in half"
     finally:
-        for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
-            signal.signal(s, signal.default_int_handler if s == signal.SIGINT else signal.SIG_DFL)
+        _restore_default_handlers()
 
 
 def test_a_second_signal_escalates_instead_of_raising():
@@ -53,16 +61,15 @@ def test_a_second_signal_escalates_instead_of_raising():
     lifecycle.install_signal_handlers(escalate=lambda: escalated.append(True))
     try:
         with pytest.raises(lifecycle.RunStopped):
-            os.kill(os.getpid(), signal.SIGTERM)
+            signal.raise_signal(signal.SIGTERM)
             time.sleep(0.05)
         # cleanup is running now; a second signal must not abort it
         with lifecycle.critical():
-            os.kill(os.getpid(), signal.SIGTERM)
+            signal.raise_signal(signal.SIGTERM)
             time.sleep(0.05)
         assert escalated == [True]
     finally:
-        for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
-            signal.signal(s, signal.default_int_handler if s == signal.SIGINT else signal.SIG_DFL)
+        _restore_default_handlers()
 
 
 DRIVER = textwrap.dedent("""
@@ -92,7 +99,7 @@ def test_stop_unwinds_the_driver_like_ctrl_c(tmp_path):
                 break
             time.sleep(0.05)
         assert lifecycle.stop(tmp_path, wait_s=10) == "stopped"
-        assert (tmp_path / "cleaned").read_text() == "yes", "the cleanup path ran"
+        assert (tmp_path / "cleaned").read_text(encoding="utf-8") == "yes", "the cleanup path ran"
     finally:
         proc.kill()
         proc.wait()
@@ -177,6 +184,7 @@ def test_the_anchor_is_done_only_once_it_is_scored(tmp_path):
         lock.release()
 
 
+@posix_only  # tmux and its unix sockets
 def test_a_finished_runs_tmux_socket_is_swept(tmp_path, monkeypatch):
     import socket
 
@@ -288,6 +296,8 @@ def test_stop_refuses_a_run_driven_from_another_host(tmp_path, monkeypatch):
         lock.update(host="node-elsewhere", pid=os.getpid())
         signalled = []
         monkeypatch.setattr(lifecycle.os, "kill", lambda pid, sig: signalled.append(pid))
+        monkeypatch.setattr(lifecycle.oscompat, "request_stop", signalled.append)
+        monkeypatch.setattr(lifecycle.oscompat, "kill", signalled.append)
         outcome = lifecycle.stop(tmp_path)
         assert outcome.startswith("refused") and "node-elsewhere" in outcome
         assert signalled == []
@@ -295,14 +305,15 @@ def test_stop_refuses_a_run_driven_from_another_host(tmp_path, monkeypatch):
         lock.release()
 
 
-def test_a_planted_lock_file_neither_hangs_nor_is_followed(tmp_path):
+def test_a_planted_lock_file_neither_hangs_nor_is_followed(tmp_path, symlink):
     """`.lock` sits in the block's working directory; a FIFO there used to hang open()."""
-    os.mkfifo(tmp_path / lifecycle.LOCK_FILE)
-    assert lifecycle.holder(tmp_path) is None
-    with pytest.raises(lifecycle.RunLocked, match="not a regular file"):
-        lifecycle.RunLock(tmp_path).acquire()
-    (tmp_path / lifecycle.LOCK_FILE).unlink()
-    (tmp_path / lifecycle.LOCK_FILE).symlink_to(tmp_path / "target")
+    if hasattr(os, "mkfifo"):  # Windows has no FIFOs to plant
+        os.mkfifo(tmp_path / lifecycle.LOCK_FILE)
+        assert lifecycle.holder(tmp_path) is None
+        with pytest.raises(lifecycle.RunLocked, match="not a regular file"):
+            lifecycle.RunLock(tmp_path).acquire()
+        (tmp_path / lifecycle.LOCK_FILE).unlink()
+    symlink(tmp_path / lifecycle.LOCK_FILE, tmp_path / "target")
     with pytest.raises(lifecycle.RunLocked):
         lifecycle.RunLock(tmp_path).acquire()
     assert not (tmp_path / "target").exists()
@@ -322,8 +333,10 @@ def test_leases_tolerate_whatever_is_in_the_shared_directory(tmp_path, monkeypat
     lifecycle.LEASE_DIR.mkdir()
     (lifecycle.LEASE_DIR / "gpu0.1.json").write_text("[1, 2, 3]\n", encoding="utf-8")
     (lifecycle.LEASE_DIR / "gpu0.2.json").write_text("not json", encoding="utf-8")
-    os.mkfifo(lifecycle.LEASE_DIR / "gpu0.3.json")
-    (lifecycle.LEASE_DIR / "gpu0.4.json").symlink_to(tmp_path / "nowhere")
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(lifecycle.LEASE_DIR / "gpu0.3.json")
+    with contextlib.suppress(OSError):  # no link where the system refuses to make one
+        (lifecycle.LEASE_DIR / "gpu0.4.json").symlink_to(tmp_path / "nowhere")
     assert lifecycle.holders(0) == [], "none of these is a claim, and none may hang the reader"
 
     lifecycle.claim([0], tmp_path / "run")

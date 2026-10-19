@@ -18,6 +18,9 @@ import pytest
 
 from pinnforge.ui import api, server
 
+# Permission bits mean nothing on Windows, which guards a file with its ACL.
+posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+
 TOKEN = "s3cret-token"
 
 
@@ -254,6 +257,7 @@ def test_an_event_stream_ends_and_frees_its_slot(open_srv, monkeypatch):
 # ─────────────────────────────── ui.json ───────────────────────────────
 
 
+@posix_only
 def test_ui_json_is_private_from_its_first_byte(tmp_path):
     old = os.umask(0)
     try:
@@ -264,11 +268,12 @@ def test_ui_json_is_private_from_its_first_byte(tmp_path):
         f.chmod(0o644)
         server._write_private(f, '{"token": "y"}\n')
         assert stat.S_IMODE(f.stat().st_mode) == 0o600
-        assert json.loads(f.read_text()) == {"token": "y"}
+        assert json.loads(f.read_text(encoding="utf-8")) == {"token": "y"}
     finally:
         os.umask(old)
 
 
+@posix_only
 def test_serve_records_its_token_privately(ws, monkeypatch):
     seen = {}
 
@@ -278,7 +283,7 @@ def test_serve_records_its_token_privately(ws, monkeypatch):
         def serve_forever(self, **_):
             f = server.state_file(ws)
             seen["mode"] = stat.S_IMODE(f.stat().st_mode)
-            seen["info"] = json.loads(f.read_text())
+            seen["info"] = json.loads(f.read_text(encoding="utf-8"))
 
         def server_close(self):
             pass

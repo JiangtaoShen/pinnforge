@@ -31,6 +31,8 @@ pinnforge setup                    # choose and prove the coding agent that runs
 pinnforge doctor                   # every prerequisite, with the fix for anything missing
 ```
 
+On Windows, install from PowerShell with `powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/JiangtaoShen/pinnforge/main/install.ps1 | iex"` and make the workspace with `pinnforge init $HOME\pf; cd $HOME\pf`. Runs there train on the CPU; to use the GPU, install inside WSL2 instead.
+
 On a machine with several GPUs, `init` lists them with what is running on each
 and asks which this workspace may use — one, several, all, or none. That is the
 operator's call: ask the user rather than choosing, and pass it as

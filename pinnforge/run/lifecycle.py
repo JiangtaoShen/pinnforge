@@ -28,7 +28,6 @@ Three things a run used to lack, and what replaces them:
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import json
 import logging
@@ -42,9 +41,11 @@ import sys
 import time
 from pathlib import Path
 
+from pinnforge import oscompat
+
 LOCK_FILE = ".lock"
 DETACH_FILE = ".detach.json"
-LEASE_DIR = Path("/tmp/pinnforge-leases")
+LEASE_DIR = oscompat.shared_tmp() / "pinnforge-leases"
 # A tmux socket younger than this may belong to a server still starting up.
 SOCKET_GRACE_S = 60.0
 
@@ -74,7 +75,7 @@ def _open_regular(path: Path, flags: int = os.O_RDONLY, mode: int = 0o644) -> in
     to follow somewhere else, or a FIFO whose `open()` would hang the caller
     until somebody writes to it.
     """
-    fd = os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK, mode)
+    fd = oscompat.open_file(path, flags | oscompat.O_NONBLOCK, mode)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise OSError(f"{path} is not a regular file")
@@ -139,7 +140,7 @@ class RunLock:
                 f"cannot use {self.path} as the run's lock ({e}); remove it and try again"
             ) from None
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            oscompat.lock(fd, block=False)
         except BlockingIOError:
             os.close(fd)
             h = _read_json(self.path)
@@ -166,7 +167,7 @@ class RunLock:
 
     def _reap_orphan(self, previous: dict) -> None:
         pgid = _as_pid(previous.get("agent_pgid"))
-        if pgid is None or pgid == os.getpgid(0):
+        if pgid is None or pgid == oscompat.own_pgid():
             return
         host = previous.get("host")
         if host and host != socket.gethostname():
@@ -220,7 +221,7 @@ def holder(run: Path) -> dict | None:
     except OSError:
         return None
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        oscompat.lock(fd, block=False)
     except BlockingIOError:
         return _read_fd(fd) or {"pid": None}
     except OSError:
@@ -231,7 +232,7 @@ def holder(run: Path) -> dict | None:
             return info
         return info if _pid_alive(info.get("pid")) else None
     else:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        oscompat.unlock(fd)
         return None
     finally:
         os.close(fd)
@@ -239,15 +240,7 @@ def holder(run: Path) -> dict | None:
 
 def _pid_alive(pid) -> bool:
     pid = _as_pid(pid)
-    if pid is None:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    return pid is not None and oscompat.pid_alive(pid)
 
 
 # ─────────────────────────────── process groups ───────────────────────────────
@@ -284,13 +277,7 @@ def group_alive(pgid) -> bool:
     members = _group_members(pgid)
     if members is not None:
         return any(state not in ("Z", "X") for _, state in members)
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    return oscompat.group_alive(pgid)
 
 
 def group_in(pgid, run: Path) -> bool | None:
@@ -325,13 +312,13 @@ def terminate_group(pgid, grace: float = 10.0) -> bool:
     the GPU lock on the way out, and a KILL takes that chance away.
     """
     pgid = _as_pid(pgid)
-    if pgid is None or pgid == os.getpgid(0):
+    if pgid is None or pgid == oscompat.own_pgid():
         return True
-    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 5.0)):
+    for sig, wait in ((signal.SIGTERM, grace), (oscompat.SIGKILL, 5.0)):
         if not group_alive(pgid):
             return True
         with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(pgid, sig)
+            oscompat.killpg(pgid, sig)
         deadline = time.time() + wait
         while time.time() < deadline:
             if not group_alive(pgid):
@@ -346,13 +333,16 @@ _sig = {"depth": 0, "deferred": None, "count": 0, "escalate": None}
 
 
 def install_signal_handlers(escalate=None) -> None:
-    """Route SIGTERM, SIGHUP and SIGINT through `RunStopped`.
+    """Route SIGTERM, SIGHUP and SIGINT (and Ctrl-Break) through `RunStopped`.
 
-    `escalate()` is called on the second signal instead of raising.
+    `escalate()` is called on the second signal instead of raising. On
+    Windows, `stop()` from another process arrives as Ctrl-C, through
+    `oscompat.listen_for_stop`.
     """
     _sig.update(depth=0, deferred=None, count=0, escalate=escalate)
-    for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+    for s in oscompat.STOP_SIGNALS:
         signal.signal(s, _handler)
+    oscompat.listen_for_stop()
 
 
 def _handler(signum, frame) -> None:
@@ -383,10 +373,10 @@ def critical():
 
 def kill_group(pgid) -> None:
     pgid = _as_pid(pgid)
-    if pgid is None or pgid == os.getpgid(0):
+    if pgid is None or pgid == oscompat.own_pgid():
         return
     with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(pgid, signal.SIGKILL)
+        oscompat.killpg(pgid, oscompat.SIGKILL)
 
 
 # ─────────────────────────────── stopping ───────────────────────────────
@@ -407,7 +397,8 @@ def stop(run: Path, force: bool = False, wait_s: float = 90.0) -> str:
     if not _pid_alive(pid):
         return "not running"
     pid = int(pid)
-    os.kill(pid, signal.SIGTERM)
+    if not oscompat.request_stop(pid) and not force:
+        return f"pid {pid} cannot be asked to stop — `run stop --force` to kill it"
     deadline = time.time() + (10.0 if force else wait_s)
     while time.time() < deadline:
         if holder(run) is None:
@@ -419,7 +410,7 @@ def stop(run: Path, force: bool = False, wait_s: float = 90.0) -> str:
     if group_in(info.get("agent_pgid"), run) is not False:
         kill_group(info.get("agent_pgid"))
     with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.kill(pid, signal.SIGKILL)
+        oscompat.kill(pid)
     return "killed"
 
 
@@ -441,6 +432,8 @@ def _sweep_sockets(prefix: str) -> None:
     new: a server another `run start` is bringing up right now has bound its
     socket but may not be listening yet, and refuses connections until it is.
     """
+    if not hasattr(os, "getuid"):
+        return  # no tmux, so no sockets, where there is no uid
     base = Path(os.environ.get("TMUX_TMPDIR") or "/tmp") / f"tmux-{os.getuid()}"
     for p in base.glob(f"{prefix}*"):
         try:
@@ -467,7 +460,8 @@ def detach(cmd: list[str], *, cwd: Path, log: Path, name: str, record: Path) -> 
     With tmux, on a tmux server of its own: a fresh server inherits *this*
     environment — API keys, PATH, CUDA_VISIBLE_DEVICES — whereas a session
     added to a long-running server gets that server's environment from
-    whenever it was started. Without tmux, a new session with output in `log`.
+    whenever it was started. Without tmux, a new session with output in `log` (on Windows, a
+    console of its own, without a window).
     """
     log.parent.mkdir(parents=True, exist_ok=True)
     tmux = shutil.which("tmux")
@@ -488,9 +482,9 @@ def detach(cmd: list[str], *, cwd: Path, log: Path, name: str, record: Path) -> 
         info = {"mode": "tmux", "socket": name, "session": name, "log": str(log)}
     else:
         with log.open("a", encoding="utf-8") as out:
-            proc = subprocess.Popen(
+            proc = oscompat.popen_detached(
                 cmd, cwd=str(cwd), stdout=out, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, start_new_session=True,
+                stdin=subprocess.DEVNULL,
             )
         info = {"mode": "background", "pid": proc.pid, "log": str(log)}
     record.write_text(json.dumps(info) + "\n", encoding="utf-8")
@@ -509,9 +503,27 @@ def attach(record: Path) -> int:
             os.execvp("tmux", ["tmux", "-L", info["socket"], "attach", "-t", info["session"]])
     log = info.get("log")
     if log and Path(log).is_file():
-        os.execvp("tail", ["tail", "-n", "60", "-f", log])
+        if shutil.which("tail") and not oscompat.WINDOWS:
+            os.execvp("tail", ["tail", "-n", "60", "-f", log])
+        return follow(Path(log))
     print("nothing to attach to: the run is not detached here, or has finished")
     return 1
+
+
+def follow(log: Path, lines: int = 60) -> int:
+    """`tail -n 60 -f log`, where there is no `tail`; Ctrl-C ends it."""
+    try:
+        with log.open("r", encoding="utf-8", errors="replace") as fh:
+            sys.stdout.writelines(fh.readlines()[-lines:])
+            sys.stdout.flush()
+            while True:
+                if chunk := fh.read():
+                    sys.stdout.write(chunk)
+                    sys.stdout.flush()
+                else:
+                    time.sleep(0.5)
+    except KeyboardInterrupt:
+        return 0
 
 
 def self_command(*args: str) -> list[str]:
@@ -575,10 +587,10 @@ def claim(pool: list[int], run: Path) -> None:
         dest = _lease_path(g)
         tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
         try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+            fd = oscompat.open_file(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
             with os.fdopen(fd, "wb") as fh:
                 fh.write(data)
-            os.replace(tmp, dest)
+            oscompat.replace(tmp, dest)
         except OSError:
             with contextlib.suppress(OSError):
                 tmp.unlink()

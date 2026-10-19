@@ -38,6 +38,8 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+from pinnforge import paths
+
 DEFAULT_TOL = 1e-3
 VERDICT = "verdict.json"  # the full verdict, under private/reference/
 SOURCE = "source.json"  # where the operator's data came from, under private/reference/
@@ -108,7 +110,7 @@ def fetch(source: str, dest_dir: Path) -> tuple[Path, str]:
         with urllib.request.urlopen(req, timeout=120) as resp, out.open("wb") as fh:
             shutil.copyfileobj(resp, fh)
     else:
-        src = Path(source.removeprefix("file://")).expanduser().resolve()
+        src = Path(paths.local_path(source)).expanduser().resolve()
         if not src.exists():
             raise FileNotFoundError(f"no reference data at {src}")
         out = dest_dir / src.name
@@ -228,7 +230,8 @@ def check(
         reasons.append(f"FIELDS {missing} are not among REF_COLUMNS {list(cols)}")
         return fail()
 
-    with tempfile.TemporaryDirectory(prefix="pinnforge-refcheck-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="pinnforge-refcheck-",
+                                     ignore_cleanup_errors=True) as tmp:
         mod_dir = Path(tmp) / "task"
         mod_dir.mkdir()
         mod = load_metric(task_dir, mod_dir)
@@ -347,13 +350,15 @@ def _rerun(workdir: Path, python: Path, levels, timeout: float, reasons: list[st
     if not solve.is_file():
         reasons.append("solve.py is missing — the levels cannot be reproduced")
         return False
-    with tempfile.TemporaryDirectory(prefix="pinnforge-rerun-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="pinnforge-rerun-",
+                                     ignore_cleanup_errors=True) as tmp:
         for k, stored in levels:
             out = Path(tmp) / f"L{k}.npy"
             try:
                 proc = subprocess.run(
                     [str(python), str(solve), "--level", str(k), "--out", str(out)],
-                    cwd=str(workdir), capture_output=True, text=True, timeout=timeout,
+                    cwd=str(workdir), capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=timeout,
                     check=False,
                 )
             except subprocess.TimeoutExpired:
@@ -516,10 +521,11 @@ def grid_drift(task_dir: Path, private_home: Path, *, restore: bool = False) -> 
 def solver_env(state_dir: Path, uv: str) -> Path:
     """The reference agent's own Python — never the environment blocks train in."""
     env = Path(state_dir) / "refenv"
-    python = env / "bin" / "python"
+    python = paths.venv_bin(env)
     if not python.is_file():
         subprocess.run([uv, "venv", "--python", "3.12", str(env)], check=True,
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
         subprocess.run([uv, "pip", "install", "--python", str(python), "numpy", "scipy"],
-                       check=True, capture_output=True, text=True)
+                       check=True, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
     return python

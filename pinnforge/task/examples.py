@@ -54,10 +54,10 @@ def install_demo(tasks_dir: Path, name: str = DEMO) -> Path:
         shutil.copy2(EXAMPLES_DIR / DEMO / f, dest / f)
     t = np.linspace(0.0, 1.0, GRID_N)
     x, y = (a.ravel() for a in np.meshgrid(t, t, indexing="ij"))
-    np.savetxt(
-        dest / "eval_grid.csv", np.stack([x, y], axis=1), delimiter=",", header="x,y",
-        comments="", fmt="%.10g",
-    )
+    # newline: the grid is fingerprinted, and Windows' text mode would write \r\n
+    with open(dest / "eval_grid.csv", "w", encoding="utf-8", newline="\n") as fh:
+        np.savetxt(fh, np.stack([x, y], axis=1), delimiter=",", header="x,y",
+                   comments="", fmt="%.10g")
     # The reference is read back from the written grid, so the two agree to
     # the last digit the score service will see.
     grid = np.loadtxt(dest / "eval_grid.csv", delimiter=",", skiprows=1, dtype=np.float64)
@@ -113,7 +113,8 @@ def fetch(name: str, tasks_dir: Path, source: str | None = None, force: bool = F
     if dest.exists() and not force:
         raise FileExistsError(f"{dest} already exists (pass --force to replace it)")
     url = source or e["url"]
-    with tempfile.TemporaryDirectory(prefix=f"pinnforge-{name}-") as tmp:
+    with tempfile.TemporaryDirectory(prefix=f"pinnforge-{name}-",
+                                     ignore_cleanup_errors=True) as tmp:
         archive = Path(tmp) / f"{name}.tar.gz"
         try:
             _download(url, archive)

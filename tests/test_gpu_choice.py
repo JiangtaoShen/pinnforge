@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 
 import pytest
 import yaml
@@ -81,10 +82,10 @@ def test_a_setting_is_changed_on_its_own_line(tmp_path):
     after = f.read_text(encoding="utf-8").splitlines()
     changed = [(a, b) for a, b in zip(before, after, strict=True) if a != b]
     assert changed == [("  gpus: null", "  gpus: [0, 1]")], "every comment survives"
-    assert yaml.safe_load(f.read_text())["sandbox"]["gpus"] == [0, 1]
+    assert yaml.safe_load(f.read_text(encoding="utf-8"))["sandbox"]["gpus"] == [0, 1]
 
     settings.write(f, "ui.port", 9000)
-    line = next(ln for ln in f.read_text().splitlines() if "port:" in ln)
+    line = next(ln for ln in f.read_text(encoding="utf-8").splitlines() if "port:" in ln)
     assert line == "  port: 9000", line
 
 
@@ -101,11 +102,11 @@ def test_a_missing_key_is_added_under_its_parent(tmp_path):
     odd = tmp_path / "odd.yaml"
     odd.write_text("sandbox: null\n", encoding="utf-8")
     settings.write(odd, "sandbox.gpus", [])  # a shape a line edit cannot fix: re-dumped
-    assert yaml.safe_load(odd.read_text()) == {"sandbox": {"gpus": []}}
+    assert yaml.safe_load(odd.read_text(encoding="utf-8")) == {"sandbox": {"gpus": []}}
 
     fresh = tmp_path / "new" / "config.yaml"
     settings.write(fresh, "sandbox.gpus", "auto")
-    assert yaml.safe_load(fresh.read_text()) == {"sandbox": {"gpus": "auto"}}
+    assert yaml.safe_load(fresh.read_text(encoding="utf-8")) == {"sandbox": {"gpus": "auto"}}
 
 
 def test_a_missing_key_is_indented_like_its_siblings(tmp_path):
@@ -150,7 +151,7 @@ def test_an_edit_that_changes_anything_else_is_not_kept(tmp_path, monkeypatch):
 def test_init_stores_the_choice_and_a_refresh_keeps_the_operators_settings(tmp_path):
     ws = workspace.init(tmp_path / "ws", stack_name="cpu", venv=False, gpus_spec=[1])
     assert settings.get(ws, "sandbox.gpus") == [1]
-    assert "`pinnforge setup gpus`" in (ws / "pinnforge.yaml").read_text()
+    assert "`pinnforge setup gpus`" in (ws / "pinnforge.yaml").read_text(encoding="utf-8")
 
     settings.write(ws / "pinnforge.yaml", "ui.port", 9100)
     workspace.init(ws, stack_name="cpu", venv=False, force=True)
@@ -194,7 +195,9 @@ def test_setup_gpus_changes_the_workspace_or_the_machine_default(
         tmp_path, machine, monkeypatch, capsys):
     from pinnforge.cli import setup_cmd
 
-    ws = workspace.init(tmp_path / "ws", stack_name="cuda12", venv=False)
+    # (JAX has no CUDA build for Windows: a workspace there is a CPU one)
+    ws = workspace.init(tmp_path / "ws", stack_name="cpu" if os.name == "nt" else "cuda12",
+                        venv=False)
     monkeypatch.chdir(ws)
     monkeypatch.delenv("PINNFORGE_ROOT", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))

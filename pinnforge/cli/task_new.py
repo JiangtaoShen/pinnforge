@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-from pinnforge import agents, bindings, gpus, paths, private, scoring, workspace
+from pinnforge import agents, bindings, gpus, oscompat, paths, private, scoring, workspace
 from pinnforge.config import AgentConfig
 from pinnforge.run import anchor, lifecycle
 from pinnforge.task import audit, authoring, contract, examples, reference
@@ -238,7 +238,8 @@ class Steps:
     def intake(self):
         text = authoring.render_intake(self.name, self.inputs)
         self.auth_dir.mkdir(parents=True, exist_ok=True)
-        (self.auth_dir / "intake.md").write_text(text, encoding="utf-8")
+        # bytes, as `_restore_framework` compares them: never Windows' \r\n
+        (self.auth_dir / "intake.md").write_bytes(text.encode("utf-8"))
         print(text)
         return True, ""
 
@@ -400,7 +401,7 @@ class Steps:
             if agents.group_alive(pgid) and _group_works_in(pgid, info.get("cwd")) is not False:
                 raise RuntimeError(
                     f"an agent of an earlier session of {self.name} (process group {pgid}) is "
-                    f"still running — stop it first (`kill -TERM -- -{pgid}`), then resume"
+                    f"still running — stop it first ({_stop_hint(pgid)}), then resume"
                 )
             rec.unlink(missing_ok=True)
 
@@ -457,7 +458,7 @@ class Steps:
                     raise RuntimeError(
                         f"the author agent's process group {pgid} survived being stopped; the "
                         f"answers stay sealed at {held} until it is gone "
-                        f"(`kill -KILL -- -{pgid}`, then --resume)"
+                        f"({_stop_hint(pgid, kill=True)}, then --resume)"
                     )
                 stray = None
                 if self.in_tree.exists() or self.in_tree.is_symlink():
@@ -496,7 +497,7 @@ class Steps:
             links = [d for d in dirnames if (here / d).is_symlink()]
             for name in filenames + links:
                 f = here / name
-                rel = str(f.relative_to(self.task_dir))
+                rel = f.relative_to(self.task_dir).as_posix()
                 if rel in framework:
                     continue
                 if f.is_symlink():
@@ -687,7 +688,7 @@ class Steps:
                 self.task_dir, self.private_home, self.pipe.state.get("reference", {})
             )
         else:
-            python = paths.state_dir(self.root) / "refenv" / "bin" / "python"
+            python = paths.venv_bin(paths.state_dir(self.root) / "refenv")
             verdict = reference.check(
                 self.task_dir, self.private_home, tol=self.inputs.ref_tol,
                 python=python if python.is_file() else None,
@@ -804,6 +805,13 @@ def _merge_flags(pipe: authoring.Pipeline, args, root: Path) -> list[str]:
     return changed
 
 
+def _stop_hint(pgid, kill: bool = False) -> str:
+    """How the operator stops process group `pgid` by hand."""
+    if oscompat.WINDOWS:
+        return f"`taskkill /T /F /PID {pgid}`"
+    return f"`kill -{'KILL' if kill else 'TERM'} -- -{pgid}`"
+
+
 def _reference_on_command_line() -> bool:
     return any(a == "--reference" or a.startswith("--reference=") for a in sys.argv[1:])
 
@@ -908,12 +916,21 @@ def cmd_new(args) -> int:
             # `ps` shows every ancestor's command line to every process of
             # this user — the author agent included. Carry on as a process
             # whose command line does not hold the path to the answers.
-            cmd = lifecycle.self_command("--root", str(root), "task", "new", name, "--resume")
-            if args.log:
-                cmd += ["--log", str(args.log)]
-            sys.stdout.flush()
-            sys.stderr.flush()
-            os.execv(cmd[0], cmd)
+            if oscompat.WINDOWS:
+                # There is no exec: a process cannot shed its command line, and
+                # the launcher that started it keeps its own. So the pipeline
+                # goes on detached, and both of them end.
+                print("note: given --reference, the pipeline continues detached on Windows, "
+                      "so that no process's command line holds the path to the answers")
+                args.detach = True
+            else:
+                cmd = lifecycle.self_command("--root", str(root), "task", "new", name,
+                                             "--resume")
+                if args.log:
+                    cmd += ["--log", str(args.log)]
+                sys.stdout.flush()
+                sys.stderr.flush()
+                os.execv(cmd[0], cmd)
 
     if args.detach:
         # The pipeline's console names the reference's method and provenance —
@@ -984,7 +1001,7 @@ def cmd_reference(args) -> int:
     """Check a task's reference — what the reference agent runs on itself."""
     root = paths.project_root()
     task_dir = paths.tasks_dir(root) / args.name
-    python = paths.state_dir(root) / "refenv" / "bin" / "python"
+    python = paths.venv_bin(paths.state_dir(root) / "refenv")
     tol = args.tol
     if tol is None:
         st = authoring.status(task_dir) or {}

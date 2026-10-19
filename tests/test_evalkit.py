@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import os
 import shutil
@@ -16,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from pinnforge import oscompat
 from pinnforge.task import evalkit
 
 LITERAL = "TRAIN_TIME = 60.0"
@@ -52,7 +52,8 @@ def kit(tmp_path, monkeypatch):
     def evaluate(*flags):
         monkeypatch.setattr(sys, "argv", ["eval.py", str(cand), *flags])
         assert evalkit.run(g) == 0
-        rec = json.loads((run / "blocks" / "b01" / "evals.jsonl").read_text().splitlines()[-1])
+        log = run / "blocks" / "b01" / "evals.jsonl"
+        rec = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
         return rec, seen
 
     return evaluate
@@ -62,7 +63,7 @@ def test_a_gpu_run_trains_on_its_card_and_queues_on_its_lock(kit, monkeypatch):
     monkeypatch.delenv("JAX_PLATFORMS", raising=False)
     rec, seen = kit("--gpu", "7")
     assert seen["env"]["CUDA_VISIBLE_DEVICES"] == "7"
-    assert seen["lock"] == "/tmp/pinnforge_gpu7.lock"
+    assert seen["lock"] == os.path.join(oscompat.shared_tmp(), "pinnforge_gpu7.lock")
     assert rec["gpu"] == "7"
 
 
@@ -70,7 +71,7 @@ def test_a_cpu_run_hides_every_card_and_leaves_card_0s_queue_alone(kit, monkeypa
     monkeypatch.setenv("JAX_PLATFORMS", "cpu")
     rec, seen = kit("--gpu", "0")
     assert seen["env"]["CUDA_VISIBLE_DEVICES"] == "", "a hidden card cannot be trained on"
-    assert seen["lock"] == "/tmp/pinnforge_cpu.lock", (
+    assert seen["lock"] == os.path.join(oscompat.shared_tmp(), "pinnforge_cpu.lock"), (
         "a CPU run must not wait behind a GPU run's evaluations on card 0"
     )
     assert rec["gpu"] == "cpu", "the record names what was used"
@@ -85,7 +86,7 @@ def test_another_users_lock_file_is_usable_without_write_access(tmp_path):
     lock.chmod(0o444)  # as unwritable as another user's file under protected_regular
     fd = evalkit._open_lock(str(lock))
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # flock needs no write access
+        oscompat.lock(fd, block=False)  # flock needs no write access
     finally:
         os.close(fd)
 
@@ -99,13 +100,13 @@ def test_a_new_lock_file_is_left_usable_by_everyone(tmp_path):
     assert stat.S_IMODE((tmp_path / "pinnforge_gpu1.lock").stat().st_mode) == 0o666
 
 
-def test_a_planted_lock_file_is_refused_not_followed_or_waited_on(tmp_path):
-    fifo = tmp_path / "fifo.lock"
-    os.mkfifo(fifo)
-    with pytest.raises(OSError):
-        evalkit._open_lock(str(fifo))  # a FIFO would block a plain open forever
-    link = tmp_path / "link.lock"
-    link.symlink_to(tmp_path / "elsewhere")
+def test_a_planted_lock_file_is_refused_not_followed_or_waited_on(tmp_path, symlink):
+    if hasattr(os, "mkfifo"):  # Windows has no FIFOs to plant
+        fifo = tmp_path / "fifo.lock"
+        os.mkfifo(fifo)
+        with pytest.raises(OSError):
+            evalkit._open_lock(str(fifo))  # a FIFO would block a plain open forever
+    link = symlink(tmp_path / "link.lock", tmp_path / "elsewhere")
     with pytest.raises(OSError):
         evalkit._open_lock(str(link))
     assert not (tmp_path / "elsewhere").exists()
@@ -135,7 +136,7 @@ def test_a_lock_that_cannot_be_opened_costs_the_block_nothing(tmp_path, monkeypa
     monkeypatch.setattr(sys, "argv", ["eval.py", str(cand), "--gpu", "0"])
     assert evalkit.run(g) == 2
     budget = run / "blocks" / "b01" / ".budget"
-    assert not budget.exists() or float(budget.read_text() or 0) == 0.0
+    assert not budget.exists() or float(budget.read_text(encoding="utf-8") or 0) == 0.0
 
 
 def test_a_crash_before_training_refunds_the_pre_charge(tmp_path, monkeypatch):
@@ -150,7 +151,7 @@ def test_a_crash_before_training_refunds_the_pre_charge(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["eval.py", str(cand), "--gpu", "0"])
     with pytest.raises(RuntimeError):
         evalkit.run(g)
-    assert float((run / "blocks" / "b01" / ".budget").read_text()) == 0.0
+    assert float((run / "blocks" / "b01" / ".budget").read_text(encoding="utf-8")) == 0.0
     assert signal.getsignal(signal.SIGTERM) is not evalkit._on_signal, "handlers restored"
 
 
@@ -198,6 +199,11 @@ if __name__ == "__main__":
 '''
 
 linux_only = pytest.mark.skipif(not Path("/proc/self/fd").is_dir(), reason="needs /proc")
+# Linux watches processes through /proc; Windows asks the process table.
+live_only = pytest.mark.skipif(os.name != "nt" and not Path("/proc/self/fd").is_dir(),
+                               reason="needs /proc")
+# What stops an evaluation: SIGTERM, or on Windows its group's Ctrl-Break.
+STOP = getattr(signal, "SIGBREAK", signal.SIGTERM) if os.name == "nt" else signal.SIGTERM
 
 
 @pytest.fixture
@@ -216,9 +222,11 @@ def live(tmp_path):
     procs = []
 
     def start():
-        p = subprocess.Popen(
+        # a group of its own: on Windows a stop reaches a process only through its group
+        p = oscompat.popen_group(
             [sys.executable, "task/eval.py", "blocks/b01/b01_x.py", "--gpu", "0"],
             cwd=run, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            encoding="utf-8", errors="replace",
         )
         procs.append(p)
         return p
@@ -235,7 +243,7 @@ def live(tmp_path):
         p.wait()
     if pidfile.is_file():
         with contextlib.suppress(ProcessLookupError, ValueError):
-            os.kill(int(pidfile.read_text()), signal.SIGKILL)
+            oscompat.kill(int(pidfile.read_text(encoding="utf-8")))
 
 
 def _until(cond, timeout=20.0):
@@ -247,9 +255,19 @@ def _until(cond, timeout=20.0):
     return False
 
 
+def _stop(proc) -> None:
+    """The stop signal an orchestrator sends an evaluation."""
+    if os.name == "nt":
+        oscompat.killpg(proc.pid, signal.SIGTERM)  # the group's Ctrl-Break
+    else:
+        proc.send_signal(signal.SIGTERM)
+
+
 def _running(pid: int) -> bool:
+    if os.name == "nt":
+        return oscompat.pid_alive(pid)
     try:
-        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        state = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0]
     except (OSError, IndexError):
         return False
     return state not in ("Z", "X")
@@ -258,7 +276,7 @@ def _running(pid: int) -> bool:
 def _lock_free(path: Path) -> bool:
     fd = os.open(path, os.O_RDONLY)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        oscompat.lock(fd, block=False)
     except BlockingIOError:
         return False
     finally:
@@ -266,35 +284,43 @@ def _lock_free(path: Path) -> bool:
     return True
 
 
-@linux_only
+@live_only
 def test_a_stopped_eval_stops_its_worker_and_charges_only_what_it_took(live):
     proc = live.start()
-    assert _until(lambda: live.pidfile.is_file()), "the worker never started"
-    worker = int(live.pidfile.read_text())
-    assert float(live.budget.read_text()) == 60.0, "the training wall is pre-charged"
+    assert _until(lambda: live.pidfile.is_file() and live.pidfile.read_text(encoding="utf-8")), (
+        "the worker never started")
+    worker = int(live.pidfile.read_text(encoding="utf-8"))
+    assert float(live.budget.read_text(encoding="utf-8")) == 60.0, (
+        "the training wall is pre-charged")
     time.sleep(1.0)
-    proc.send_signal(signal.SIGTERM)
+    _stop(proc)
     _, err = proc.communicate(timeout=30)
-    assert proc.returncode == 128 + signal.SIGTERM, err
+    assert proc.returncode == 128 + STOP, err
     assert not _running(worker), "the training worker must not outlive its evaluation"
-    spent = float(live.budget.read_text())
+    spent = float(live.budget.read_text(encoding="utf-8"))
     assert 0.5 <= spent < 30, f"charged {spent} s for about a second of training"
     assert _lock_free(live.lock)
 
 
-@linux_only
+@live_only
 def test_the_worker_holds_the_device_lock_and_dies_with_its_eval(live):
-    """Killing eval.py alone used to free the card while its worker trained on."""
+    """Killing eval.py alone used to free the card while its worker trained on.
+
+    On Linux the lock is handed down to the worker; on Windows, where a lock
+    belongs to the process that took it, the worker cannot outlive eval.py.
+    """
     proc = live.start()
-    assert _until(lambda: live.pidfile.is_file()), "the worker never started"
-    worker = int(live.pidfile.read_text())
-    held = set()
-    for n in os.listdir(f"/proc/{worker}/fd"):
-        try:
-            held.add(os.readlink(f"/proc/{worker}/fd/{n}"))
-        except OSError:
-            continue
-    assert str(live.lock) in held, "the device lock is handed down to the worker"
+    assert _until(lambda: live.pidfile.is_file() and live.pidfile.read_text(encoding="utf-8")), (
+        "the worker never started")
+    worker = int(live.pidfile.read_text(encoding="utf-8"))
+    if os.name != "nt":
+        held = set()
+        for n in os.listdir(f"/proc/{worker}/fd"):
+            try:
+                held.add(os.readlink(f"/proc/{worker}/fd/{n}"))
+            except OSError:
+                continue
+        assert str(live.lock) in held, "the device lock is handed down to the worker"
     assert not _lock_free(live.lock)
     proc.kill()  # nothing to catch: only the kernel can take the worker down now
     proc.wait()
@@ -302,17 +328,19 @@ def test_the_worker_holds_the_device_lock_and_dies_with_its_eval(live):
     assert _until(lambda: _lock_free(live.lock), timeout=10)
 
 
-@linux_only
+@live_only
 def test_an_eval_stopped_while_waiting_for_the_card_is_refunded(live):
     holder = os.open(live.lock, os.O_RDWR | os.O_CREAT, 0o666)
     try:
-        fcntl.flock(holder, fcntl.LOCK_EX)  # another evaluation has the card
+        oscompat.lock(holder)  # another evaluation has the card
         proc = live.start()
-        assert _until(lambda: live.budget.is_file() and live.budget.read_text() == "60.0")
-        proc.send_signal(signal.SIGTERM)
+        assert _until(lambda: live.budget.is_file()
+                      and live.budget.read_text(encoding="utf-8") == "60.0")
+        _stop(proc)
         proc.communicate(timeout=30)
     finally:
         os.close(holder)
-    assert proc.returncode == 128 + signal.SIGTERM
-    assert float(live.budget.read_text()) == 0.0, "a run that never got the card costs nothing"
+    assert proc.returncode == 128 + STOP
+    assert float(live.budget.read_text(encoding="utf-8")) == 0.0, (
+        "a run that never got the card costs nothing")
     assert not live.pidfile.exists()

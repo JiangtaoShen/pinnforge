@@ -96,6 +96,8 @@ def run_smoke(name: str) -> tuple[int, str]:
                  "--smoke"],
                 cwd=str(run),
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 env=env,
                 check=False,  # the record is the verdict, not the exit status
             )
@@ -136,7 +138,8 @@ def scratch_run(name: str):
     inside it fails to score.
     """
     task = registry.get_task(name)
-    with tempfile.TemporaryDirectory(prefix=f"pinnforge-{name}-") as tmp:
+    with tempfile.TemporaryDirectory(prefix=f"pinnforge-{name}-",
+                                     ignore_cleanup_errors=True) as tmp:
         run = Path(tmp) / f"{name}_0"
         run.mkdir()
         registry.install(task, run)

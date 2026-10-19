@@ -100,7 +100,7 @@ def test_an_untrusted_package_leaves_the_task(tmp_path, monkeypatch, demo_src):
     steps = _steps(tmp_path)
 
     def notes(task_dir, kw):
-        (task_dir / ".authoring" / "notes.md").write_text("I looked around\n")
+        (task_dir / ".authoring" / "notes.md").write_text("I looked around\n", encoding="utf-8")
 
     monkeypatch.setattr(task_new.agents, "author_task", _author(
         demo_src, calls=[("Bash", {"command": "cat ../ks/private/ref_values.npy"})], also=notes))
@@ -112,7 +112,8 @@ def test_an_untrusted_package_leaves_the_task(tmp_path, monkeypatch, demo_src):
     kept = steps.private_home / "logs" / "untrusted-package-1"
     assert (kept / "problem.md").is_file() and (kept / ".authoring" / "notes.md").is_file()
     assert (steps.private_home / "logs" / "author.untrusted.log").is_file()
-    assert "../ks/private" in (steps.private_home / "logs" / task_new.AUDIT_LOG).read_text()
+    audit_log = steps.private_home / "logs" / task_new.AUDIT_LOG
+    assert "../ks/private" in audit_log.read_text(encoding="utf-8")
 
     # a resume whose harness then fails at once has nothing left to accept
     monkeypatch.setattr(task_new.agents, "author_task", _author(demo_src, rc=1, write=False))
@@ -195,7 +196,8 @@ def test_the_author_never_sees_the_operator_s_path_in_a_note(tmp_path, monkeypat
     monkeypatch.setattr(task_new.agents, "author_task", author_task)
     ok, note = steps.author()
     assert ok is False and "the operator's data" in note
-    assert data not in note and data not in authoring.state_path(steps.task_dir).read_text()
+    state = authoring.state_path(steps.task_dir).read_text(encoding="utf-8")
+    assert data not in note and data not in state
 
 
 # ─────────────────────────────── an external private directory ───────────────────────────────
@@ -232,7 +234,7 @@ def test_an_external_private_directory_is_where_every_stage_looks(tmp_path, monk
                            uv="uv", gpu="", tol=1e-3, budget_s=60, log_path=tmp_path / "l",
                            root=tmp_path)
     assert captured["cwd"] == srv / "heat" / "reference"
-    assert f"{srv / 'heat'}/ref_values.npy" in captured["prompt"]
+    assert f"{(srv / 'heat').as_posix()}/ref_values.npy" in captured["prompt"]
     assert "../ref_values.npy" not in captured["prompt"]
 
 
@@ -264,7 +266,8 @@ def _ingest(tmp_path, monkeypatch, *, header="x,y", info=None, extra=None, also=
             "grid_columns": ["x", "y; the solution peaks at 0.98"], "input_columns": 2,
             "ref_columns": ["u"], "rows": 99999, "source": "cavity run 7, Re=1000",
             "notes": "u max 0.98"}
-        (steps.private_home / "reference" / "ingest.json").write_text(json.dumps(meta))
+        (steps.private_home / "reference" / "ingest.json").write_text(json.dumps(meta),
+                                                                      encoding="utf-8")
         if also:
             also(steps)
         return SimpleNamespace(duration_s=1.0, returncode=0, timed_out=False)
@@ -282,7 +285,7 @@ def test_an_ingest_publishes_only_the_shape_the_files_show(tmp_path, monkeypatch
     shown = steps.pipe.state["reference"]
     assert shown["grid_columns"] == ["x", "y"] and shown["rows"] == 441
     assert shown["input_columns"] == 2 and shown["ref_columns"] == ["u"]
-    text = authoring.state_path(steps.task_dir).read_text()
+    text = authoring.state_path(steps.task_dir).read_text(encoding="utf-8")
     assert "0.98" not in text and "cavity" not in text and "Re=1000" not in text
     assert reference.grid_drift(steps.task_dir, steps.private_home) == ""
 
@@ -311,8 +314,8 @@ def test_a_grid_that_carries_the_answers_never_reaches_the_author(tmp_path, monk
 
 def test_an_ingest_agent_that_writes_into_the_package_fails(tmp_path, monkeypatch):
     def writes(steps):
-        (steps.task_dir / "problem.md").write_text("u peaks at 0.98\n")
-        (steps.task_dir / ".authoring" / "hint.md").write_text("0.98\n")
+        (steps.task_dir / "problem.md").write_text("u peaks at 0.98\n", encoding="utf-8")
+        (steps.task_dir / ".authoring" / "hint.md").write_text("0.98\n", encoding="utf-8")
 
     steps = _ingest(tmp_path, monkeypatch, also=writes)
     ok, note = steps.reference()
@@ -327,8 +330,9 @@ def test_the_author_may_not_touch_the_ingested_grid(tmp_path, monkeypatch, demo_
     pinned = (steps.task_dir / "eval_grid.csv").read_bytes()
 
     def resort(task_dir, kw):
-        lines = (task_dir / "eval_grid.csv").read_text().splitlines()
-        (task_dir / "eval_grid.csv").write_text("\n".join([lines[0], *sorted(lines[1:])]) + "\n")
+        lines = (task_dir / "eval_grid.csv").read_text(encoding="utf-8").splitlines()
+        (task_dir / "eval_grid.csv").write_text("\n".join([lines[0], *sorted(lines[1:])]) + "\n",
+                                                encoding="utf-8")
 
     def author_task(name, **kw):
         task_dir = kw["root"] / "tasks" / name
@@ -421,8 +425,18 @@ def test_the_pipeline_re_executes_without_the_reference_path(tmp_path, monkeypat
         raise Exec
 
     monkeypatch.setattr(task_new.os, "execv", execv)
-    with pytest.raises(Exec):
-        task_new.cmd_new(_parse(*argv[3:]))
+    if os.name == "nt":
+        # No exec on Windows: the pipeline goes on detached, and both processes
+        # whose command line held the path — this one and its launcher — end.
+        def detach(cmd, **kw):
+            execs.append(cmd)
+            return {"mode": "background", "pid": 1, "log": str(kw["log"])}
+
+        monkeypatch.setattr(task_new.lifecycle, "detach", detach)
+        assert task_new.cmd_new(_parse(*argv[3:])) == 0
+    else:
+        with pytest.raises(Exec):
+            task_new.cmd_new(_parse(*argv[3:]))
     cmd = execs[0]
     assert "--resume" in cmd and "--reference" not in cmd and str(data) not in " ".join(cmd)
     assert reference.source_location(tmp_path / "tasks" / "heat" / "private") == str(data)
@@ -490,6 +504,7 @@ def test_the_agent_s_group_is_gone_when_the_session_ends(tmp_path, monkeypatch, 
     assert not record.exists() and agents.live_pgid() is None
 
 
+@pytest.mark.skipif(os.name == "nt", reason="on Windows an agent dies with its session")
 def test_resume_is_refused_while_an_earlier_agent_lives(tmp_path):
     steps = _steps(tmp_path)
     held = steps._sealed_home() / "private"
@@ -499,7 +514,7 @@ def test_resume_is_refused_while_an_earlier_agent_lives(tmp_path):
     try:
         rec = held / "logs" / task_new.AGENT_RECORD
         rec.parent.mkdir()
-        rec.write_text(json.dumps({"pgid": proc.pid, "cwd": str(steps.task_dir)}))
+        rec.write_text(json.dumps({"pgid": proc.pid, "cwd": str(steps.task_dir)}), encoding="utf-8")
         with pytest.raises(RuntimeError, match="still running"):
             steps.recover()
         assert (held / "ref_values.npy").is_file(), "the answers stay sealed while it lives"
@@ -529,18 +544,18 @@ def test_the_pipeline_installs_signal_handlers_and_logs_stderr(tmp_path, monkeyp
     finally:
         sys.stdout, sys.stderr = out, err
     assert installed and installed[0]["escalate"] is agents.kill_live
-    assert "a traceback would land here" in log.read_text()
+    assert "a traceback would land here" in log.read_text(encoding="utf-8")
 
 
 def test_framework_records_an_agent_changed_are_put_back(tmp_path, monkeypatch):
     def scribble(steps):
-        (steps.auth_dir / "intake.md").write_text("the answer is 0.98\n")
+        (steps.auth_dir / "intake.md").write_text("the answer is 0.98\n", encoding="utf-8")
 
     steps = _ingest(tmp_path, monkeypatch, also=scribble)
     ok, note = steps.reference()
     assert ok, note
-    assert "0.98" not in (steps.auth_dir / "intake.md").read_text()
-    assert (steps.auth_dir / "intake.md").read_text() == steps._intake_text()
+    assert "0.98" not in (steps.auth_dir / "intake.md").read_text(encoding="utf-8")
+    assert (steps.auth_dir / "intake.md").read_text(encoding="utf-8") == steps._intake_text()
 
 
 def test_a_builder_whose_harness_keeps_its_session_warns_in_the_note(tmp_path, monkeypatch,
@@ -554,7 +569,7 @@ def test_a_builder_whose_harness_keeps_its_session_warns_in_the_note(tmp_path, m
 
     def build_reference(name, **kw):
         np.save(steps.private_home / "ref_values.npy", np.zeros((10201, 1)))
-        kw["log_path"].write_text("message=created id=ses_0123456789\n")
+        kw["log_path"].write_text("message=created id=ses_0123456789\n", encoding="utf-8")
         return SimpleNamespace(duration_s=1.0, returncode=0, timed_out=False)
 
     monkeypatch.setattr(task_new.agents, "build_reference", build_reference)

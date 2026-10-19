@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.py\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.py\" || python \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.py\" || py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.py\""
           }
         ]
       }

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import signal
 
-from pinnforge import paths, settings
+from pinnforge import oscompat, paths, settings
 
 
 def cmd_ui(args) -> int:
@@ -18,8 +18,10 @@ def cmd_ui(args) -> int:
     if args.serve:
         host = args.host or str(settings.get(root, "ui.host", "127.0.0.1"))
         port = int(args.port or settings.get(root, "ui.port", 8765))
-        # SIGTERM from `pinnforge ui --stop` ends the loop like Ctrl-C.
+        # SIGTERM from `pinnforge ui --stop` ends the loop like Ctrl-C (on Windows
+        # it arrives as Ctrl-C itself).
         signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+        oscompat.listen_for_stop()
         server.serve(root, host, port)
         return 0
     url = server.ensure_running(root, args.host, args.port)

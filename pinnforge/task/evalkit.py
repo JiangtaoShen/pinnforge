@@ -41,7 +41,6 @@ What a task module provides (read from its globals):
 from __future__ import annotations
 
 import argparse
-import fcntl
 import io
 import json
 import os
@@ -62,6 +61,103 @@ from pathlib import Path
 PROTOCOL = 1  # score-queue protocol; must match pinnforge.scoring.PROTOCOL
 QUEUE = ".scoreq"
 POLL_S = 0.5
+
+_WINDOWS = os.name == "nt"
+
+# ────────────────────────── the operating system ──────────────────────────
+#
+# Stand-ins for `fcntl.flock` and process groups on Windows, inline because
+# this file may import nothing outside the standard library. On Windows a
+# lock is `LockFileEx` on one byte far past any data (its locks are
+# mandatory, and must not stop anyone reading the file), and a worker lives
+# in a Job Object that dies with this process — what a process group and
+# PR_SET_PDEATHSIG give on Linux.
+
+if _WINDOWS:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    class _OVERLAPPED(ctypes.Structure):
+        _fields_ = [("Internal", ctypes.c_size_t), ("InternalHigh", ctypes.c_size_t),
+                    ("Offset", wintypes.DWORD), ("OffsetHigh", wintypes.DWORD),
+                    ("hEvent", wintypes.HANDLE)]
+
+    class _JOB_LIMITS(ctypes.Structure):  # JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_longlong),
+                    ("PerJobUserTimeLimit", ctypes.c_longlong),
+                    ("LimitFlags", wintypes.DWORD),
+                    ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t),
+                    ("ActiveProcessLimit", wintypes.DWORD),
+                    ("Affinity", ctypes.c_size_t),
+                    ("PriorityClass", wintypes.DWORD),
+                    ("SchedulingClass", wintypes.DWORD),
+                    ("IoInfo", ctypes.c_ulonglong * 6),
+                    ("ProcessMemoryLimit", ctypes.c_size_t),
+                    ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                    ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+    _k32.LockFileEx.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                                wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(_OVERLAPPED))
+    _k32.UnlockFileEx.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.DWORD, ctypes.POINTER(_OVERLAPPED))
+    _k32.CreateJobObjectW.restype = wintypes.HANDLE
+    _k32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+    _k32.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID,
+                                             wintypes.DWORD)
+    _k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    _k32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    _k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+
+def _lock(f) -> None:
+    """Block until this process holds the exclusive lock on open file `f`."""
+    if not _WINDOWS:
+        import fcntl
+
+        fcntl.flock(f, fcntl.LOCK_EX)
+        return
+    handle = msvcrt.get_osfhandle(f if isinstance(f, int) else f.fileno())
+    while True:  # polled, so a stop signal is still taken while queued
+        ov = _OVERLAPPED(Offset=0, OffsetHigh=0x40000000)
+        if _k32.LockFileEx(handle, 0x3, 0, 1, 0, ctypes.byref(ov)):  # exclusive, don't wait
+            return
+        if ctypes.get_last_error() != 33:  # ERROR_LOCK_VIOLATION: someone else holds it
+            raise ctypes.WinError(ctypes.get_last_error())
+        time.sleep(0.05)
+
+
+def _unlock(f) -> None:
+    if not _WINDOWS:
+        import fcntl
+
+        fcntl.flock(f, fcntl.LOCK_UN)
+        return
+    handle = msvcrt.get_osfhandle(f if isinstance(f, int) else f.fileno())
+    ov = _OVERLAPPED(Offset=0, OffsetHigh=0x40000000)
+    _k32.UnlockFileEx(handle, 0, 1, 0, ctypes.byref(ov))
+
+
+def _new_job():
+    """A Job Object whose processes are killed when its last handle closes (Windows)."""
+    job = _k32.CreateJobObjectW(None, None)
+    if not job:
+        return None
+    limits = _JOB_LIMITS(LimitFlags=0x2000)  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not _k32.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+        _k32.CloseHandle(job)
+        return None
+    return job
+
+
+def _device_lock_path(slot: str) -> str:
+    """The machine-wide lock for one card (or the CPU): `/tmp` on POSIX."""
+    base = tempfile.gettempdir() if _WINDOWS else "/tmp"
+    return os.path.join(base, f"pinnforge_{'cpu' if slot == 'cpu' else 'gpu' + slot}.lock")
 
 # ────────────────────────── score-queue client ──────────────────────────
 
@@ -244,9 +340,13 @@ WORKER_GRACE_S = 5.0
 # On Linux a worker runs in a process group of its own — so it and anything
 # it starts can be stopped as a unit — and is told to die with this process
 # (PR_SET_PDEATHSIG), so a kill nobody could catch still takes it down.
-# Elsewhere it stays in this process's group, where a group kill reaches it.
+# On Windows a Job Object does both. Elsewhere it stays in this process's
+# group, where a group kill reaches it.
 _ISOLATE = sys.platform.startswith("linux")
-_STOP_SIGNALS = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+# SIGBREAK: the console's Ctrl-Break, which is how a group is asked to stop on Windows.
+_STOP_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTERM", "SIGHUP", "SIGINT", "SIGBREAK")
+                      if hasattr(signal, name))
+_SIGKILL = getattr(signal, "SIGKILL", 9)
 
 
 class Stopped(BaseException):
@@ -257,7 +357,14 @@ class Stopped(BaseException):
         self.signum = signum
 
 
+# Without `pthread_sigmask` (Windows) a held signal is parked here instead.
+_held = {"depth": 0, "signum": None}
+
+
 def _on_signal(signum, frame) -> None:
+    if _held["depth"] > 0:
+        _held["signum"] = signum
+        return
     raise Stopped(signum)
 
 
@@ -293,11 +400,20 @@ class _signals_held:
     """
 
     def __enter__(self):
-        self.old = signal.pthread_sigmask(signal.SIG_BLOCK, _STOP_SIGNALS)
+        if hasattr(signal, "pthread_sigmask"):
+            self.old = signal.pthread_sigmask(signal.SIG_BLOCK, _STOP_SIGNALS)
+        else:
+            _held["depth"] += 1
         return self
 
     def __exit__(self, *exc) -> None:
-        signal.pthread_sigmask(signal.SIG_SETMASK, self.old)
+        if hasattr(signal, "pthread_sigmask"):
+            signal.pthread_sigmask(signal.SIG_SETMASK, self.old)
+            return
+        _held["depth"] -= 1
+        if _held["depth"] == 0 and _held["signum"] is not None:
+            signum, _held["signum"] = _held["signum"], None
+            raise Stopped(signum)
 
 
 def _log_wall_spent(log_path: Path) -> float:
@@ -320,7 +436,7 @@ def _budget_mutate(block_dir: Path, fn) -> float:
     """File-locked read-modify-write of the block's wall-seconds counter."""
     block_dir.mkdir(parents=True, exist_ok=True)
     with open(block_dir / ".budget", "a+", encoding="utf-8") as cf:
-        fcntl.flock(cf, fcntl.LOCK_EX)
+        _lock(cf)
         cf.seek(0)
         txt = cf.read().strip()
         try:
@@ -344,9 +460,13 @@ def _open_lock(path: str) -> int:
     an existing file is opened read-only; a missing one is created
     exclusively and made world-writable, so whoever comes next can do the
     same. Never through a link, and never anything but a regular file.
+    (Windows has no `O_NOFOLLOW`: a link there is refused before the open.)
     """
-    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+             | getattr(os, "O_BINARY", 0))
     for _ in range(5):
+        if _WINDOWS and os.path.islink(path):
+            raise OSError(f"{path} is a link")
         try:
             fd = os.open(path, flags)
         except FileNotFoundError:
@@ -354,7 +474,7 @@ def _open_lock(path: str) -> int:
                 fd = os.open(path, flags | os.O_CREAT | os.O_EXCL, 0o666)
             except FileExistsError:
                 continue  # created by someone else in between; open theirs
-            with suppress(OSError):
+            with suppress(OSError, AttributeError):  # no fchmod on Windows
                 os.fchmod(fd, 0o666)  # the umask had its say at creation
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
@@ -419,16 +539,24 @@ def _stop_worker(proc: subprocess.Popen, grace: float = WORKER_GRACE_S) -> None:
 
     The group is killed while the worker is still unreaped: until then its
     number cannot have been handed to anybody else — which is also why a
-    worker already reaped is not signalled at all.
+    worker already reaped is not signalled at all. On Windows, where a TERM
+    would be a kill anyway, the worker's job is ended at once.
     """
     if proc.returncode is not None:
         return
-    if grace > 0 and not _exited(proc):
-        _signal_worker(proc, signal.SIGTERM)
-        deadline = time.time() + grace
-        while time.time() < deadline and not _exited(proc):
-            time.sleep(0.05)
-    _signal_worker(proc, signal.SIGKILL)
+    job = getattr(proc, "_forge_job", None)
+    if job is not None:
+        _k32.TerminateJobObject(job, 1)
+    elif _WINDOWS:
+        with suppress(OSError):
+            proc.kill()
+    else:
+        if grace > 0 and not _exited(proc):
+            _signal_worker(proc, signal.SIGTERM)
+            deadline = time.time() + grace
+            while time.time() < deadline and not _exited(proc):
+                time.sleep(0.05)
+        _signal_worker(proc, _SIGKILL)
     with suppress(subprocess.TimeoutExpired):
         proc.wait(timeout=10)
 
@@ -439,6 +567,8 @@ def _spawn(cmd: list[str], env: dict, wall: float, keep_fds=(), clock=None):
     `keep_fds` stay open in the worker: the device lock is passed this way,
     so it is held for as long as either process lives — killing this one
     alone used to free the card while its worker went on training on it.
+    Windows cannot pass a descriptor, and its locks belong to the process
+    that took them; there the worker cannot outlive this process instead.
     `clock["t0"]` is set the moment the worker exists, for the budget.
     """
     kwargs = {}
@@ -446,25 +576,37 @@ def _spawn(cmd: list[str], env: dict, wall: float, keep_fds=(), clock=None):
         kwargs["process_group"] = 0
         if (arm := _die_with_parent()) is not None:
             kwargs["preexec_fn"] = arm
+    if not _WINDOWS:
+        kwargs["pass_fds"] = tuple(keep_fds)
     if clock is not None:
         clock["t0"] = time.time()
+    # errors="replace": a worker's stderr in another encoding must not cost the record
     proc = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
-        pass_fds=tuple(keep_fds), **kwargs,
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+        errors="replace", env=env, **kwargs,
     )
+    if _WINDOWS and (job := _new_job()) is not None:
+        if _k32.AssignProcessToJobObject(job, int(proc._handle)):
+            proc._forge_job = job
+        else:
+            _k32.CloseHandle(job)
     try:
         try:
-            out, err = proc.communicate(timeout=wall)
-        except subprocess.TimeoutExpired:
-            _stop_worker(proc, grace=0)
-            out, err = proc.communicate()
-            return proc.returncode, out or "", err or "", True
-    except BaseException:
-        # A second signal must not cut this short: the worker would outlive it.
-        with _signals_held():
-            _stop_worker(proc)
-        raise
-    return proc.returncode, out or "", err or "", False
+            try:
+                out, err = proc.communicate(timeout=wall)
+            except subprocess.TimeoutExpired:
+                _stop_worker(proc, grace=0)
+                out, err = proc.communicate()
+                return proc.returncode, out or "", err or "", True
+        except BaseException:
+            # A second signal must not cut this short: the worker would outlive it.
+            with _signals_held():
+                _stop_worker(proc)
+            raise
+        return proc.returncode, out or "", err or "", False
+    finally:
+        if (job := getattr(proc, "_forge_job", None)) is not None:
+            _k32.CloseHandle(job)  # and with it whatever the worker left running
 
 
 def _run_worker(eval_py: Path, mode: str, argv: list[str], env: dict, wall: float,
@@ -583,7 +725,7 @@ def run(g: dict) -> int:
     on_cpu = os.environ.get("JAX_PLATFORMS", "").strip().lower() == "cpu"
     slot = "cpu" if on_cpu else args.gpu
     devices = "" if on_cpu else args.gpu
-    lock_path = "/tmp/pinnforge_cpu.lock" if on_cpu else f"/tmp/pinnforge_gpu{args.gpu}.lock"
+    lock_path = _device_lock_path(slot)
 
     old_handlers = _install_handlers()
     lock_fd = None
@@ -642,7 +784,7 @@ def _diag(cand, root, block, slot, devices, base_env, train_wall, budget, lock_f
     env["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
     env["FORGE_EVAL_TOKEN"] = "task/eval.py"
     env["CUDA_VISIBLE_DEVICES"] = devices
-    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    _lock(lock_fd)
     t0 = time.time()
     env["FORGE_T0"] = str(t0)
     code, out, err, timed_out = _spawn([sys.executable, str(cand)], env, train_wall,
@@ -652,7 +794,7 @@ def _diag(cand, root, block, slot, devices, base_env, train_wall, budget, lock_f
     else:
         error = None if code == 0 else f"exit code {code}"
     wall_s = time.time() - t0
-    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    _unlock(lock_fd)
     spent = charge.settle(wall_s)
     if out:
         print(out[-8000:])
@@ -661,7 +803,7 @@ def _diag(cand, root, block, slot, devices, base_env, train_wall, budget, lock_f
     record = {
         "ts": _now(),
         "block": block,
-        "candidate": str(cand.relative_to(root)),
+        "candidate": cand.relative_to(root).as_posix(),
         "seed": None, "gpu": slot,
         "smoke": False, "diag": True,
         "rRMSE": None, "step_count": None,
@@ -698,7 +840,7 @@ def _evaluate(args, g, eval_py, cand, root, block, block_dir, log_path, source, 
             wall = train_wall
             # blocking per-GPU lock: concurrent evals on the same GPU serialize;
             # the worker holds it too, for as long as it lives
-            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            _lock(lock_fd)
             keep = (lock_fd,)
 
         train_out, train_s = _run_worker(
@@ -706,7 +848,7 @@ def _evaluate(args, g, eval_py, cand, root, block, block_dir, log_path, source, 
             env, wall, keep_fds=keep, clock=charge.clock,
         )
         if lock_fd is not None:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            _unlock(lock_fd)
 
         # a smoke is free: its "spent" is a read-only peek at the counter
         spent = _budget_mutate(block_dir, lambda s: s) if args.smoke else charge.settle(train_s)
@@ -714,7 +856,7 @@ def _evaluate(args, g, eval_py, cand, root, block, block_dir, log_path, source, 
         record = {
             "ts": _now(),
             "block": block,
-            "candidate": str(cand.relative_to(root)),
+            "candidate": cand.relative_to(root).as_posix(),
             "seed": args.seed,
             "gpu": None if args.smoke else slot,
             "smoke": bool(args.smoke),
@@ -731,7 +873,7 @@ def _evaluate(args, g, eval_py, cand, root, block, block_dir, log_path, source, 
                 suffix = f"_s{args.seed}" if args.seed != 0 else ""
                 params_final = cand.with_name(cand.stem + suffix + ".pkl")
                 params_final.write_bytes(params_tmp.read_bytes())
-                record["params"] = str(params_final.relative_to(root))
+                record["params"] = params_final.relative_to(root).as_posix()
             eval_env = dict(base_env)
             eval_env["JAX_PLATFORMS"] = "cpu"
             # Context the score request is filed under — the daemon's ledger
@@ -739,7 +881,7 @@ def _evaluate(args, g, eval_py, cand, root, block, block_dir, log_path, source, 
             eval_env["FORGE_TASK"] = _task_name(root)
             eval_env["FORGE_RUN_ID"] = root.name
             eval_env["FORGE_BLOCK"] = block
-            eval_env["FORGE_CANDIDATE"] = str(cand.relative_to(root))
+            eval_env["FORGE_CANDIDATE"] = cand.relative_to(root).as_posix()
             eval_env["FORGE_SEED"] = str(args.seed)
             eval_env["FORGE_SMOKE"] = "1" if args.smoke else "0"
             eval_out, _ = _run_worker(

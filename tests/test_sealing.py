@@ -72,10 +72,11 @@ def test_printed_reference_values_are_caught(tmp_path):
 def test_words_about_the_solution_and_paths_to_the_answers_are_caught(tmp_path):
     task = _demo(tmp_path)
     problem = task / "problem.md"
-    problem.write_text(problem.read_text().replace(
+    problem.write_text(problem.read_text(encoding="utf-8").replace(
         "## Scoring\n", "## Scoring\n\nThe exact solution is smooth.\n"), encoding="utf-8")
     base = task / "baseline.py"
-    base.write_text(base.read_text() + '\nHINT = "private/ref_values.npy"\nX = "answers.csv"\n',
+    base.write_text(base.read_text(encoding="utf-8")
+                    + '\nHINT = "private/ref_values.npy"\nX = "answers.csv"\n',
                     encoding="utf-8")
     failed = _failures(task)
     assert "exact solution" in failed["problem.md says nothing about the solution"]
@@ -115,11 +116,12 @@ def test_printed_values_are_caught_however_printed(tmp_path, how):
 def test_problem_constants_and_hyperparameters_are_not_printed_values(tmp_path):
     task = _demo(tmp_path)
     problem = task / "problem.md"
-    problem.write_text(problem.read_text().replace(
+    problem.write_text(problem.read_text(encoding="utf-8").replace(
         "## Domain\n", "Constants: $\\nu = 0.001234$, $\\pi \\approx 3.14159$, $L = 2.7183$, "
         "$c = 0.70711$.\n\n## Domain\n"), encoding="utf-8")
     base = task / "baseline.py"
-    base.write_text(base.read_text() + "\nHP = dict(lr=1.234e-3, width=128, depth=4, "
+    base.write_text(base.read_text(encoding="utf-8")
+                    + "\nHP = dict(lr=1.234e-3, width=128, depth=4, "
                     "decay=0.9995, beta=0.12345, eps=1.0e-8, warmup=1000)\n", encoding="utf-8")
     assert LEAK_TEXT not in _failures(task)
 
@@ -144,11 +146,12 @@ def test_data_files_holding_the_reference_are_caught(tmp_path, how):
     elif how == "txt":
         np.savetxt(task / "u.txt", u)
     elif how == "json":
-        (task / "field.json").write_text(json.dumps({"meta": "x", "u": u.tolist()}))
+        (task / "field.json").write_text(json.dumps({"meta": "x", "u": u.tolist()}),
+                                         encoding="utf-8")
     elif how == "string column":
         rows = "\n".join(f"p{i},{x:.6f},{y:.6f},{v:.8f}" for i, ((x, y), v) in
                          enumerate(zip(grid, u, strict=True)))
-        (task / "points.csv").write_text("label,x,y,w\n" + rows + "\n")
+        (task / "points.csv").write_text("label,x,y,w\n" + rows + "\n", encoding="utf-8")
     elif how == "2-D field":
         np.save(task / "field.npy", u.reshape(101, 101))
     elif how == "subsampled":
@@ -183,12 +186,12 @@ def test_masks_and_flags_are_not_compared(tmp_path):
 def test_sentences_that_deny_a_solution_and_prose_about_privacy_pass(tmp_path):
     task = _demo(tmp_path)
     problem = task / "problem.md"
-    problem.write_text(problem.read_text().replace(
+    problem.write_text(problem.read_text(encoding="utf-8").replace(
         "## Domain\n", "No closed-form solution is known. There is no exact solution "
         "for these data either; the analytical solution is unknown.\n\n## Domain\n"),
         encoding="utf-8")
     base = task / "baseline.py"
-    base.write_text(base.read_text() + '\n"""Kept private to this module."""\n'
+    base.write_text(base.read_text(encoding="utf-8") + '\n"""Kept private to this module."""\n'
                     'SUFFIX = ".csv"\nPATTERN = "*.csv"\nNOTE = "results go to out.csv later"\n',
                     encoding="utf-8")
     failed = _failures(task)
@@ -201,7 +204,7 @@ def test_sentences_that_deny_a_solution_and_prose_about_privacy_pass(tmp_path):
 def test_private_as_a_path_is_still_caught(tmp_path, literal):
     task = _demo(tmp_path)
     base = task / "baseline.py"
-    base.write_text(base.read_text() + f"\nWHERE = {literal}\n", encoding="utf-8")
+    base.write_text(base.read_text(encoding="utf-8") + f"\nWHERE = {literal}\n", encoding="utf-8")
     assert "baseline.py never names the answers" in _failures(task)
 
 
@@ -209,7 +212,7 @@ def test_the_scoring_truth_is_the_answers_not_a_directory(tmp_path):
     task = _demo(tmp_path)
     (task / "private" / "ref_values.npy").unlink()
     (task / "private" / "logs").mkdir()
-    (task / "private" / "logs" / "pipeline.log").write_text("x")
+    (task / "private" / "logs" / "pipeline.log").write_text("x", encoding="utf-8")
     assert "ships the scoring truth under private/" in _failures(task)
 
 
@@ -234,8 +237,8 @@ def test_the_intake_and_the_record_never_say_where_the_answers_are(tmp_path):
     steps = _steps(tmp_path, str(data))
     assert steps.intake()[0]
     for f in steps.auth_dir.iterdir():
-        assert "secret_solution" not in f.read_text(), f.name
-    assert "supplied by the operator." in (steps.auth_dir / "intake.md").read_text()
+        assert "secret_solution" not in f.read_text(encoding="utf-8"), f.name
+    assert "supplied by the operator." in (steps.auth_dir / "intake.md").read_text(encoding="utf-8")
     assert reference.source_location(steps.private_home, "operator") == str(data)
 
 
@@ -301,8 +304,9 @@ def test_the_reference_agent_may_not_touch_the_package(tmp_path):
     (steps.task_dir / "problem.md").write_text("# HEAT — heat\n", encoding="utf-8")
     before = steps._public()
     assert steps._guard(before, set()) == ""
-    (steps.task_dir / "problem.md").write_text("# HEAT — heat\nhint: u peaks at 0.98\n")
-    (steps.task_dir / "u_peak_0.98.txt").write_text("0.98\n")
+    (steps.task_dir / "problem.md").write_text("# HEAT — heat\nhint: u peaks at 0.98\n",
+                                               encoding="utf-8")
+    (steps.task_dir / "u_peak_0.98.txt").write_text("0.98\n", encoding="utf-8")
     why = steps._guard(before, set())
     assert "2 file(s)" in why
     assert "problem.md" not in why and "0.98" not in why, "the note names nothing it wrote"
@@ -310,10 +314,10 @@ def test_the_reference_agent_may_not_touch_the_package(tmp_path):
     assert not (steps.task_dir / "problem.md").exists()
     assert not (steps.task_dir / "u_peak_0.98.txt").exists()
     kept = steps.private_home / "logs" / "reference-guard-1"
-    assert "0.98" in (kept / "problem.md").read_text()
+    assert "0.98" in (kept / "problem.md").read_text(encoding="utf-8")
     assert steps.pipe.state["stages"]["author"]["status"] == "pending"
     before = steps._public()
-    (steps.task_dir / "eval_grid.csv").write_text("x\n0\n")
+    (steps.task_dir / "eval_grid.csv").write_text("x\n0\n", encoding="utf-8")
     assert steps._guard(before, {"eval_grid.csv"}) == ""
 
 
@@ -323,13 +327,13 @@ def test_the_guard_covers_the_authoring_records_and_the_anchor_cache(tmp_path):
     before = steps._public()
     # the framework's own files may change while an agent runs
     steps.pipe._save()
-    (steps.auth_dir / "detach.json").write_text("{}")
-    (steps.auth_dir / "lock").write_text("1")
+    (steps.auth_dir / "detach.json").write_text("{}", encoding="utf-8")
+    (steps.auth_dir / "lock").write_text("1", encoding="utf-8")
     assert steps._guard(before, set()) == ""
     for rel in (".authoring/notes.md", ".anchor/b00.json"):
         before = steps._public()
         f = steps.task_dir / rel
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text("u(0.5) = 0.7071\n")
+        f.write_text("u(0.5) = 0.7071\n", encoding="utf-8")
         assert steps._guard(before, set()), rel
         assert not f.exists()

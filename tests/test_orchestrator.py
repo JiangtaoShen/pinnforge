@@ -764,11 +764,12 @@ def test_what_an_agent_leaves_running_is_stopped_when_it_exits(tmp_path):
                    cwd=tmp_path, env=dict(os.environ), log_path=tmp_path / "a.log",
                    block_id="b01")
     orch._await(handle, "b01")
-    bg = int(pidfile.read_text())
+    bg = int(pidfile.read_text(encoding="utf-8"))
 
     def running(pid):
         try:
-            state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+            state = stat.rsplit(")", 1)[1].split()[0]
         except (OSError, IndexError):
             return False
         return state not in ("Z", "X")

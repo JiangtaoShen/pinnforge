@@ -8,6 +8,7 @@ program, and the agents are the workers it starts.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
 
@@ -158,7 +159,26 @@ def _banner(command: str) -> None:
         print(note, file=sys.stderr)
 
 
+def _utf8_everywhere() -> None:
+    """Windows: print UTF-8, and have every Python started from here do the same.
+
+    Its pipes and files default to the ANSI code page (cp936, cp1252, …),
+    which cannot hold a ✓, a ² or most of a traceback: printing one to a pipe
+    raised, and a child reading a UTF-8 file without naming the encoding read
+    garbage. Children — agents, `eval.py`, its workers — inherit UTF-8 mode,
+    so a block behaves the same on every system.
+    """
+    if os.name != "nt":
+        return
+    os.environ.setdefault("PYTHONUTF8", "1")
+    for stream in (sys.stdout, sys.stderr):
+        if (getattr(stream, "encoding", "") or "").lower().replace("-", "") != "utf8":
+            with contextlib.suppress(AttributeError, ValueError):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_everywhere()
     args = build_parser().parse_args(argv)
     if args.root:
         os.environ["PINNFORGE_ROOT"] = args.root

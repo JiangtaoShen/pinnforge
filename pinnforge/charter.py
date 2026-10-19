@@ -21,11 +21,16 @@ across harnesses.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pinnforge import paths
 from pinnforge.config import DEFAULT_WALL_BUDGET, RunConfig
 from pinnforge.task import contract
+
+# The run's interpreter as a block types it: forward slashes, which every shell
+# a harness may use — bash, PowerShell, cmd — reads the same way.
+VENV_PYTHON = ".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python"
 
 # The dispatch prompt. Held constant across every runtime — a block that got
 # different instructions on a different harness would not be the same block.
@@ -87,6 +92,7 @@ def render_charter(cfg: RunConfig, root: Path | None = None) -> str:
         .replace("{{GPU_COUNT}}", count)
         .replace("{{GPU_FLAGS}}", flags)
         .replace("{{GPU_PARALLEL}}", parallel)
+        .replace("{{PYTHON}}", VENV_PYTHON)
     )
 
 
@@ -97,7 +103,7 @@ def write_charter(run: Path, cfg: RunConfig, root: Path | None = None) -> Path:
 
 
 def block_prompt(block_id: str, run: Path, crashed: bool = False) -> str:
-    prompt = BLOCK_PROMPT.format(block_id=block_id, root=str(run))
+    prompt = BLOCK_PROMPT.format(block_id=block_id, root=Path(run).as_posix())
     if crashed:
         prompt += CRASHED_SUFFIX.format(block_id=block_id)
     return prompt

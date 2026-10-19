@@ -1,0 +1,21 @@
+# Line endings are part of what this repository means. Git for Windows turns
+# \n into \r\n on checkout by default (core.autocrlf), which would change:
+#
+# * a task's fingerprint — the md5 of its baseline.py, eval.py and data files,
+#   which every cached b00 anchor is keyed on — so a Windows checkout would
+#   re-measure anchors a Linux one restores, and the two would never agree;
+# * install.sh and the hook scripts, which a POSIX shell refuses with \r in them.
+#
+# So text is LF everywhere, and task packages are bytes, exactly as committed.
+* text=auto eol=lf
+
+tasks/** -text
+pinnforge/examples/** -text
+pinnforge/task/evalkit.py -text
+# the corpus is kept as it was distilled
+pinnforge/kb1/** -text
+
+*.npy binary
+*.npz binary
+*.pkl binary
+*.png binary

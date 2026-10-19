@@ -7,7 +7,16 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows natively (CPU JAX; GPUs go through WSL2, which is the Linux job),
+        # and macOS, where JAX also trains on the CPU.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     env:
       # `uv run` re-syncs the default groups (dev + the multi-GB JAX `stack`)
       # before every command unless told not to; the environment is the one
@@ -25,4 +34,13 @@ jobs:
       - run: uv run ruff check .
       - run: uv run pytest tests/ -q
       - name: the installer script parses
+        if: runner.os != 'Windows'
         run: sh -n install.sh
+      - name: the Windows installer script parses
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/install.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors; exit 1 }

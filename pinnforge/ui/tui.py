@@ -78,7 +78,10 @@ def lines(root: Path, run_id: str, width: int = 100) -> list[tuple[str, str]]:
 
 
 def watch(root: Path, run_id: str) -> int:
-    import curses
+    try:
+        import curses
+    except ImportError:  # Windows' Python ships without it
+        return _watch_plain(root, run_id)
 
     def loop(scr) -> None:
         curses.curs_set(0)
@@ -106,3 +109,34 @@ def watch(root: Path, run_id: str) -> int:
 
     curses.wrapper(loop)
     return 0
+
+
+def _watch_plain(root: Path, run_id: str) -> int:
+    """`watch` without curses: the same lines, redrawn every two seconds; q or Ctrl-C quits."""
+    import os
+    import shutil
+
+    keys = None
+    if os.name == "nt":
+        import msvcrt as keys
+
+        os.system("")  # lets the console take the escape codes below
+    try:
+        while True:
+            width, height = shutil.get_terminal_size()
+            try:
+                rows = lines(root, run_id, width - 1)
+            except api.NotFound:
+                rows = [("bad", f"no run {run_id}")]
+            text = "\n".join(t[: width - 1] for _, t in rows[: height - 2])
+            print(f"\x1b[H\x1b[2J{text}\n\nq quit · refreshed {time.strftime('%H:%M:%S')}",
+                  end="", flush=True)
+            deadline = time.time() + 2.0
+            while time.time() < deadline:
+                if keys is not None and keys.kbhit() and keys.getwch() in ("q", "Q", "\x1b"):
+                    return 0
+                time.sleep(0.1)
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        print()

@@ -27,8 +27,11 @@ pinnforge = "pinnforge.cli:main"
 # releases, and an unbounded floor is how `ruff check .` went from clean to 71
 # findings without a line of this repo changing.
 dev = ["pytest>=8.0", "ruff>=0.16,<0.17"]
+# JAX publishes CUDA wheels for Linux only; elsewhere the checkout gets the
+# CPU build, as `pinnforge init` gives a workspace there.
 stack = [
-    "jax[cuda12]==0.4.33",
+    "jax[cuda12]==0.4.33; sys_platform == 'linux'",
+    "jax==0.4.33; sys_platform != 'linux'",
     "flax==0.9.0",
     "optax==0.2.3",
     "numpy==2.1.1",

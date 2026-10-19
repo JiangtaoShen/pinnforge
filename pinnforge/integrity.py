@@ -31,7 +31,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pinnforge import paths
+from pinnforge import oscompat, paths
 
 MANIFEST_DIR = ".integrity"
 CHUNK = 1 << 20
@@ -226,7 +226,7 @@ def save(run: Path, man: Manifest, segment: int | None = None) -> Path:
     while True:
         path = manifest_path(run, man.block, seg)
         try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+            fd = oscompat.open_file(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
         except FileExistsError:
             if segment is not None:
                 raise
@@ -260,7 +260,7 @@ def record_result(run: Path, block: str, segment: int, violations: list[Violatio
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
-        os.replace(tmp, path)
+        oscompat.replace(tmp, path)
     except BaseException:
         with suppress(OSError):
             os.unlink(tmp)

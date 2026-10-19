@@ -34,7 +34,6 @@ private `logs/pipeline-errors.log`.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
@@ -43,7 +42,7 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pinnforge import paths, private
+from pinnforge import oscompat, paths, private
 
 STATE_DIR = ".authoring"
 # What the framework itself writes into `.authoring/` while a stage runs — the
@@ -141,7 +140,7 @@ class Pipeline:
         self.state["updated"] = _now()
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.state, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(path)
+        oscompat.replace(tmp, path)
 
     def begin(self, inputs: Inputs) -> None:
         self.state = {
@@ -180,9 +179,9 @@ class Pipeline:
     def lock(self) -> None:
         d = self.task_dir / STATE_DIR
         d.mkdir(parents=True, exist_ok=True)
-        fd = os.open(d / "lock", os.O_RDWR | os.O_CREAT, 0o644)
+        fd = os.open(d / "lock", os.O_RDWR | os.O_CREAT | oscompat.O_BINARY, 0o644)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            oscompat.lock(fd, block=False)
         except BlockingIOError:
             os.close(fd)
             raise RuntimeError(

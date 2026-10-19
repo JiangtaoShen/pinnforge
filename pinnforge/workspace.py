@@ -92,7 +92,11 @@ def stack() -> dict[str, Any]:
 
 
 def detect_stack() -> str:
-    """`cuda12` on Linux with an NVIDIA GPU visible, `cpu` everywhere else."""
+    """`cuda12` on Linux with an NVIDIA GPU visible, `cpu` everywhere else.
+
+    (JAX publishes CUDA wheels for Linux only: a Windows machine trains on the
+    CPU, and reaches its card through WSL2.)
+    """
     if sys.platform.startswith("linux") and gpus.inventory():
         return "cuda12"
     return "cpu"
@@ -130,16 +134,18 @@ def pinnforge_source(root: Path) -> tuple[str, str | None, str]:
             src = f'{{ git = "{url}", rev = "{rev}" }}'
             return "pinnforge", src, f"git {url} @ {rev[:12]}"
         if url.startswith("file://"):
-            local = Path(url[len("file://"):])
+            # Forward slashes in the TOML: a Windows path's backslashes are escapes there.
+            local = Path(paths.local_path(url))
             if "dir_info" in info:
                 editable = bool((info.get("dir_info") or {}).get("editable"))
-                src = f'{{ path = "{local}", editable = {"true" if editable else "false"} }}'
+                src = (f'{{ path = "{local.as_posix()}", '
+                       f'editable = {"true" if editable else "false"} }}')
                 return "pinnforge", src, f"{'editable ' if editable else ''}checkout {local}"
             if local.is_file():  # a wheel: keep a copy, the original may be a cache
                 keep = paths.state_dir(root) / "wheels" / local.name
                 keep.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(local, keep)
-                return "pinnforge", f'{{ path = "{keep}" }}', f"wheel {local.name}"
+                return "pinnforge", f'{{ path = "{keep.as_posix()}" }}', f"wheel {local.name}"
         elif url and "dir_info" not in info:
             # A wheel or sdist fetched from a URL: the same archive again.
             return "pinnforge", f'{{ url = "{url}" }}', f"archive {url}"
@@ -181,6 +187,9 @@ def _refuse_foreign_pyproject(root: Path) -> None:
 def render_pyproject(root: Path, stack_name: str) -> str:
     if stack_name not in STACKS:
         raise ValueError(f"unknown stack {stack_name!r} (choose from {', '.join(STACKS)})")
+    if stack_name == "cuda12" and sys.platform == "win32":
+        raise ValueError("jax[cuda12] has no Windows wheels: use `--stack cpu` here, or run "
+                         "PINNForge inside WSL2 to train on the GPU")
     s = stack()
     requirement, source, note = pinnforge_source(root)
     deps = [requirement, *s["common"], *s[stack_name]]
@@ -244,7 +253,8 @@ def stack_of(root: Path) -> str | None:
         return None
     text = py.read_text(encoding="utf-8")
     if "jax[cuda12]" in text:
-        return "cuda12"
+        # a workspace made under WSL2, opened from Windows: there it is CPU-only
+        return "cpu" if sys.platform == "win32" else "cuda12"
     if '"jax==' in text:
         return "cpu"
     return None
@@ -252,14 +262,15 @@ def stack_of(root: Path) -> str | None:
 
 def venv_version(root: Path) -> str | None:
     """The PINNForge version installed in a workspace's environment."""
-    python = Path(root) / ".venv" / "bin" / "python"
+    python = paths.venv_bin(Path(root) / ".venv")
     if not python.is_file():
         return None
     try:
         out = subprocess.run(
             [str(python), "-c",
              "import importlib.metadata as m; print(m.version('pinnforge'))"],
-            capture_output=True, text=True, timeout=30, check=False,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30, check=False,
         )
     except (subprocess.SubprocessError, OSError):
         return None

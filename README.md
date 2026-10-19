@@ -14,10 +14,18 @@ is a question the filesystem answers, so no model is asked to decide it.
 curl -fsSL https://raw.githubusercontent.com/JiangtaoShen/pinnforge/main/install.sh | sh
 ```
 
+On Windows, in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/JiangtaoShen/pinnforge/main/install.ps1 | iex"
+```
+
 `uv tool install` puts a light `pinnforge` (PyYAML, NumPy) on PATH, from this
 repository. Not `pip install pinnforge`: that name on PyPI is an unrelated
 project. Linux with an NVIDIA GPU is the target; macOS and CPU-only machines
-run, slowly. Windows: use WSL2.
+run, slowly. Windows runs natively on the CPU, since JAX has no CUDA build for
+it; to train on its GPU, install inside WSL2 with `install.sh`. Claude Code on
+Windows needs Git for Windows, whose Git Bash runs its shell.
 
 ## Five commands
 
@@ -91,8 +99,9 @@ pinnforge run audit ldc_1                       # did any block alter another's 
 
 `run start` freezes the task and the settings into `runs/<task>_<n>/`,
 installs the b00 anchor (from cache, from an earlier run, or measured), then
-dispatches blocks one at a time in a detached tmux session, so the run outlives
-the terminal. One process drives a run (`runs/<id>/.lock`); SIGTERM and SIGHUP
+dispatches blocks one at a time in a detached tmux session (on Windows, or
+without tmux, a background process with a log), so the run outlives the
+terminal. One process drives a run (`runs/<id>/.lock`); SIGTERM and SIGHUP
 take the same path Ctrl-C does — the agent's whole process group interrupted,
 the segment's cost booked, the integrity verdict written — and `run stop`
 signals that process instead of editing its state. A block counts as finished

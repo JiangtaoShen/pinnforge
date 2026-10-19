@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
-from pinnforge import bindings, paths
+from pinnforge import bindings, oscompat, paths
 
 
 def plugin_dir() -> Path | None:
@@ -74,6 +75,10 @@ def cmd_chat(args) -> int:
         argv += ["--model", agent.model]
     argv += args.rest
     os.chdir(root)
+    if oscompat.WINDOWS:
+        # exec there is a new process and an exit: the shell would take the
+        # console back while Claude Code is still reading from it
+        return subprocess.call(oscompat.resolve_command(argv))
     os.execvp(argv[0], argv)
     return 0  # not reached
 

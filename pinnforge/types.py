@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from pinnforge import oscompat
+
 # ──────────────────────────── evaluations ────────────────────────────
 
 # How a record says the score service never answered: the client's timeout
@@ -217,7 +219,7 @@ class RunState:
         self.updated_at = utcnow()
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(self.to_dict(), indent=2) + "\n", encoding="utf-8")
-        tmp.replace(path)  # atomic — a kill mid-write must not lose the run
+        oscompat.replace(tmp, path)  # atomic — a kill mid-write must not lose the run
 
     @classmethod
     def load(cls, path: Path) -> RunState:

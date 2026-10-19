@@ -93,7 +93,7 @@ def test_only_intended_lines_differ_from_the_original():
     original = text.splitlines()
     rendered = charter.render_charter(
         _cfg(gpus=[0, 1], wall_budget_s=_reference_budget(text))
-    ).splitlines()
+    ).replace(charter.VENV_PYTHON, ".venv/bin/python").splitlines()  # the reference is POSIX
     import difflib
 
     changed = [
@@ -117,8 +117,8 @@ def test_block_prompt_is_runtime_independent():
     run = Path("/tmp/pinnforge-run")
     prompt = charter.block_prompt("b03", run)
     assert "You are PINNForge block b03" in prompt
-    assert f"{run}/block.md" in prompt
-    assert f"{run}/blocks/b03/" in prompt
+    assert f"{run.as_posix()}/block.md" in prompt
+    assert f"{run.as_posix()}/blocks/b03/" in prompt
     assert "foreground" in prompt
     # The prompt takes no runtime argument, so the way this could regress is a
     # harness name leaking into the text — a tool name, a CLI flag, a vendor.

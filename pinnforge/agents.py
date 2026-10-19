@@ -28,7 +28,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from pinnforge import paths, private
+from pinnforge import oscompat, paths, private
 from pinnforge.config import AgentConfig
 from pinnforge.run import lifecycle
 from pinnforge.runtime import registry as runtime_registry
@@ -44,6 +44,13 @@ class AgentRun:
     duration_s: float
     returncode: int | None
     timed_out: bool = False
+
+
+def _path(p) -> str:
+    """A local path as a prompt names it: forward slashes, which every shell an
+    agent may type into — bash (Git Bash on Windows), PowerShell, cmd — reads
+    the same way, where a backslash is an escape to bash."""
+    return Path(p).as_posix()
 
 
 def _render(name: str, **fields: str) -> str:
@@ -68,24 +75,18 @@ def group_alive(pgid) -> bool:
         pgid = int(pgid)
     except (TypeError, ValueError):
         return False
-    if pgid <= 0 or pgid == os.getpgid(0):
+    if pgid <= 0 or pgid == oscompat.own_pgid():
         return False
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    return oscompat.group_alive(pgid)
 
 
 def end_group(pgid, grace: float = 10.0) -> bool:
     """TERM what is left of group `pgid`, KILL it after `grace`; True once it is gone."""
-    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 5.0)):
+    for sig, wait in ((signal.SIGTERM, grace), (oscompat.SIGKILL, 5.0)):
         if not group_alive(pgid):
             return True
         with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(int(pgid), sig)
+            oscompat.killpg(int(pgid), sig)
         deadline = time.time() + wait
         while time.time() < deadline:
             if not group_alive(pgid):
@@ -99,7 +100,7 @@ def kill_live() -> None:
     pgid = _LIVE["pgid"]
     if group_alive(pgid):
         with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(int(pgid), signal.SIGKILL)
+            oscompat.killpg(int(pgid), oscompat.SIGKILL)
 
 
 def read_record(path: Path) -> dict:
@@ -211,11 +212,11 @@ def author_task(
     dest.mkdir(parents=True, exist_ok=True)
     prompt = _render(
         "task_author.md",
-        dest=str(dest),
+        dest=_path(dest),
         intake=intake.strip(),
         sources=", ".join(str(s) for s in sources) or "none — the description above is all",
         mode=mode.strip(),
-        template_task=str(template),
+        template_task=_path(template),
         validate_cmd=f"pinnforge task validate {name} --no-reference",
     )
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -253,11 +254,11 @@ def build_reference(
     workdir.mkdir(parents=True, exist_ok=True)
     prompt = _render(
         "reference_builder.md",
-        workdir=str(workdir),
-        task_dir=str(task_dir),
-        private_dir=str(home),
-        python=str(python),
-        uv=uv,
+        workdir=_path(workdir),
+        task_dir=_path(task_dir),
+        private_dir=_path(home),
+        python=_path(python),
+        uv=_path(uv),
         gpu=gpu,
         budget_min=f"{budget_s / 60:.0f}",
         tol=f"{tol:g}",
@@ -299,11 +300,11 @@ def ingest_reference(
         "reference_ingest.md",
         intake=intake.strip(),
         user_data=str(user_data),
-        python=str(python),
-        uv=uv,
-        workdir=str(workdir),
-        task_dir=str(task_dir),
-        private_dir=str(home),
+        python=_path(python),
+        uv=_path(uv),
+        workdir=_path(workdir),
+        task_dir=_path(task_dir),
+        private_dir=_path(home),
         budget_min=f"{budget_s / 60:.0f}",
     )
     return _drive(
@@ -336,8 +337,8 @@ def distill_kb1(
     kb1 = seed_corpus(root)
     prompt = _render(
         "kb1_distill.md",
-        kb1=str(kb1),
-        sources=str(sources),
+        kb1=_path(kb1),
+        sources=_path(sources),
         instruction=instruction.strip() or "Distil every paper in the sources.",
     )
     log = root / "logs" / f"kb1-distill.{int(time.time())}.log"

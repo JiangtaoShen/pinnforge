@@ -31,7 +31,8 @@ def _version(path: str) -> str | None:
     """Best-effort `pinnforge --version`; None if it does not answer quickly."""
     try:
         out = subprocess.run(
-            [path, "--version"], capture_output=True, text=True, timeout=5, check=False
+            [path, "--version"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=5, check=False
         )
     except (subprocess.TimeoutExpired, OSError):
         return None
@@ -52,7 +53,8 @@ def _find() -> tuple[str | None, Path | None]:
     if on_path:
         return on_path, workspace
     if workspace is not None:
-        local = workspace / ".venv" / "bin" / "pinnforge"
+        exe = "Scripts/pinnforge.exe" if os.name == "nt" else "bin/pinnforge"
+        local = workspace / ".venv" / exe
         if local.is_file():
             return str(local), workspace
     return None, workspace
@@ -83,14 +85,27 @@ def _installed(path: str, version: str | None, workspace: Path | None) -> str:
 
 
 def _missing() -> str:
+    if os.name == "nt":
+        install = (
+            "```powershell\n"
+            "powershell -ExecutionPolicy ByPass -c \"irm "
+            "https://raw.githubusercontent.com/JiangtaoShen/pinnforge/main/install.ps1 | iex\"\n"
+            "pinnforge init $HOME\\pf; cd $HOME\\pf; pinnforge demo\n"
+            "```\n\n"
+        )
+    else:
+        install = (
+            "```bash\n"
+            "curl -fsSL "
+            "https://raw.githubusercontent.com/JiangtaoShen/pinnforge/main/install.sh | sh\n"
+            "pinnforge init ~/pf && cd ~/pf && pinnforge demo\n"
+            "```\n\n"
+        )
     return (
         "# PINNForge CLI not found\n\n"
         "The `pinnforge` CLI is not installed. If the user wants PINNForge, install it:\n\n"
-        "```bash\n"
-        "curl -fsSL https://raw.githubusercontent.com/JiangtaoShen/pinnforge/main/install.sh | sh\n"
-        "pinnforge init ~/pf && cd ~/pf && pinnforge demo\n"
-        "```\n\n"
-        "The `pinnforge-quickstart` skill covers the path from there to a launched run.\n"
+        + install
+        + "The `pinnforge-quickstart` skill covers the path from there to a launched run.\n"
     )
 
 

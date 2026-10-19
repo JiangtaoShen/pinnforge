@@ -134,7 +134,7 @@ def test_hard_links_to_the_answers_are_not_read(ws, served):
     assert b03["evals"] == 0 and b03["summary"] is False
 
 
-def test_the_safe_reader_refuses_links_fifos_and_the_answers(tmp_path):
+def test_the_safe_reader_refuses_links_fifos_and_the_answers(tmp_path, plant):
     from pinnforge.ui import safe
 
     f = tmp_path / "ok.txt"
@@ -142,11 +142,12 @@ def test_the_safe_reader_refuses_links_fifos_and_the_answers(tmp_path):
     assert safe.read_bytes(f, 100) == b"fine"
     os.link(f, tmp_path / "twin.txt")
     assert safe.read_bytes(f, 100) is None, "two links: either could be the answers"
-    (tmp_path / "sym.txt").symlink_to(tmp_path / "twin.txt")
+    plant(tmp_path / "sym.txt", tmp_path / "twin.txt")
     assert safe.read_bytes(tmp_path / "sym.txt", 100) is None
-    os.mkfifo(tmp_path / "pipe")
-    assert _within(lambda: safe.read_bytes(tmp_path / "pipe", 100),
-                   fifos=[tmp_path / "pipe"]) is None
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(tmp_path / "pipe")
+        assert _within(lambda: safe.read_bytes(tmp_path / "pipe", 100),
+                       fifos=[tmp_path / "pipe"]) is None
     (tmp_path / "private").mkdir()
     (tmp_path / "private" / "x").write_text("no", encoding="utf-8")
     assert safe.read_bytes(tmp_path / "private" / "x", 100) is None
@@ -157,6 +158,7 @@ def test_the_safe_reader_refuses_links_fifos_and_the_answers(tmp_path):
 # ─────────────────────────────── FIFOs ───────────────────────────────
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs on this system")
 def test_fifos_planted_where_the_dashboard_reads_do_not_hang_it(ws):
     run = ws / "runs" / "toy_1"
     (run / "blocks" / "b02").mkdir()
@@ -190,9 +192,10 @@ def test_feeds_tail_refuses_what_api_refuses(tmp_path):
     assert [e["text"] for e in feeds.tail(log, None, "opencode")[0]] == ["hello"]
     os.link(log, tmp_path / "b01.1.log")
     assert feeds.tail(log, None, "opencode") == ([], 0)
-    os.mkfifo(tmp_path / "b01.2.log")
-    assert _within(lambda: feeds.tail(tmp_path / "b01.2.log", None, "opencode"),
-                   fifos=[tmp_path / "b01.2.log"]) == ([], 0)
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(tmp_path / "b01.2.log")
+        assert _within(lambda: feeds.tail(tmp_path / "b01.2.log", None, "opencode"),
+                       fifos=[tmp_path / "b01.2.log"]) == ([], 0)
     hidden = tmp_path / ".scoreq"
     hidden.mkdir()
     (hidden / "b01.0.log").write_text("secret\n", encoding="utf-8")
@@ -202,14 +205,16 @@ def test_feeds_tail_refuses_what_api_refuses(tmp_path):
     assert feeds.tail(outside, None, "opencode", root_real=str(tmp_path / "ws")) == ([], 0)
 
 
-def test_a_log_directory_linked_at_the_answers_is_not_tailed(ws, served):
+def test_a_log_directory_linked_at_the_answers_is_not_tailed(ws, served, plant):
     run = ws / "runs" / "toy_1"
     private = ws / "tasks" / "toy" / "private"
-    (private / "b01.9.log").write_text((private / "leak.log").read_text(), encoding="utf-8")
+    (private / "b01.9.log").write_text((private / "leak.log").read_text(encoding="utf-8"),
+                                       encoding="utf-8")
     os.rename(run / "logs", run / "logs.real")
-    (run / "logs").symlink_to(private)
-    (ws / "tasks" / "toy" / ".authoring").symlink_to(private)
-    (private / "author.log").write_text((private / "leak.log").read_text(), encoding="utf-8")
+    plant(run / "logs", private)
+    plant(ws / "tasks" / "toy" / ".authoring", private)
+    (private / "author.log").write_text((private / "leak.log").read_text(encoding="utf-8"),
+                                        encoding="utf-8")
     for path in ("/api/runs/toy_1/activity", "/api/runs/toy_1/activity?block=b01",
                  "/api/tasks/toy/activity", "/api/tasks/toy"):
         _, body = _get(served + path)
@@ -300,7 +305,7 @@ def test_an_unreadable_run_is_a_card_not_a_broken_page(ws, monkeypatch):
     assert ov["tasks"][0]["name"] == "toy" and ov["tasks"][0]["ready"] is False
 
 
-def test_state_and_lease_records_of_the_wrong_shape_are_empty(ws, monkeypatch, tmp_path):
+def test_state_and_lease_records_of_the_wrong_shape_are_empty(ws, monkeypatch, tmp_path, plant):
     run = ws / "runs" / "toy_1"
     (run / "state.json").write_text("[1, 2, 3]", encoding="utf-8")
     d = api.run_detail(ws, "toy_1")
@@ -311,8 +316,9 @@ def test_state_and_lease_records_of_the_wrong_shape_are_empty(ws, monkeypatch, t
     for i, body in enumerate(["[1]", '"x"', '{"pid": [1]}', '{"pid": -1, "run": "x"}',
                               '{"pid": true}', "{bad", f'{{"pid": {os.getpid()}, "run": 5}}']):
         (leases / f"gpu0.{i}.json").write_text(body, encoding="utf-8")
-    (leases / "gpu0.90.json").symlink_to(leases / "gpu0.0.json")
-    os.mkfifo(leases / "gpu0.91.json")
+    plant(leases / "gpu0.90.json", leases / "gpu0.0.json")
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(leases / "gpu0.91.json")
     (leases / "gpu0.99.json").write_text(
         json.dumps({"pid": os.getpid(), "run": "/x/runs/toy_7"}), encoding="utf-8")
     from pinnforge.run import lifecycle

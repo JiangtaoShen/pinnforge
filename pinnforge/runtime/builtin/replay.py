@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from pinnforge import paths
 from pinnforge.runtime.base import AgentHandle, AgentUsage, clean_env, spawn
 from pinnforge.runtime.builtin.claude_code import ClaudeCodeRuntime
 
@@ -184,7 +185,7 @@ def agent(block: str) -> int:
         for i in range(1, 9)
     ]
     results = []
-    python = str(run / ".venv" / "bin" / "python")
+    python = str(paths.venv_bin(run / ".venv"))
     queue = list(plan)
     turns = 0
     # at least one batch: a block is complete only with a real evaluation, and
@@ -194,12 +195,13 @@ def agent(block: str) -> int:
         procs = []
         for (slug, what, spec), gpu in zip(batch, pool, strict=False):
             path = block_dir / f"{block}_{slug}.py"
-            path.write_text(candidate(base, **spec), encoding="utf-8")
-            _tool("Write", file_path=str(path.relative_to(run)))
-            cmd = [python, "task/eval.py", str(path.relative_to(run)), "--gpu", gpu]
+            path.write_text(candidate(base, **spec), encoding="utf-8", newline="\n")
+            _tool("Write", file_path=path.relative_to(run).as_posix())
+            cmd = [python, "task/eval.py", path.relative_to(run).as_posix(), "--gpu", gpu]
             _tool("Bash", command=" ".join(cmd[1:]))
             procs.append((slug, what, subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                                       stderr=subprocess.PIPE, text=True)))
+                                                       stderr=subprocess.PIPE, text=True,
+                                                       encoding="utf-8", errors="replace")))
         for slug, what, proc in procs:
             out, _ = proc.communicate()
             lines = [ln for ln in out.splitlines() if ln.startswith("{")]
@@ -226,7 +228,7 @@ def agent(block: str) -> int:
     if best:
         lines.append(f"Best: **{block}_{best[0]}.py, rRMSE {best[2]:.4g}** ({best[1]}).")
     kb2.parent.mkdir(parents=True, exist_ok=True)
-    kb2.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    kb2.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     _tool("Write", file_path=str(kb2.relative_to(run)))
     _text(f"best: {best[2]:.4g} blocks/{block}/{block}_{best[0]}.py" if best else "no score")
     _say("result", num_turns=turns, total_cost_usd=0.0, duration_ms=int(1000 * (time.time()

@@ -29,6 +29,8 @@ pinnforge setup           # choose and prove the agent (runtime + exact model id
 pinnforge doctor          # every prerequisite, with the fix for each problem
 ```
 
+On Windows, install from PowerShell with `powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/JiangtaoShen/pinnforge/main/install.ps1 | iex"` and make the workspace with `pinnforge init $HOME\pf; cd $HOME\pf`. Runs there train on the CPU; to use the GPU, install inside WSL2 instead.
+
 ## A task from a described PDE
 
 ```bash

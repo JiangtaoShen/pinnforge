@@ -104,7 +104,7 @@ def test_the_view_is_not_part_of_the_anchor_key(tmp_path):
     before = registry.fingerprint(task)
     (task / view.VIEW_FILE).write_text(
         json.dumps({"axes": {"x": "y", "y": "x"}, "panels": [{"show": "u", "colors": "diverging"}]})
-    )
+    , encoding="utf-8")
     assert registry.fingerprint(task) == before, "what the page draws cannot move a score"
 
 
@@ -117,15 +117,15 @@ def test_the_dashboard_serves_only_a_valid_view_of_what_is_archived(tmp_path, mo
     grid = {"coords": ["x", "y"], "fields": ["u", "v"]}
     (run / "task" / view.VIEW_FILE).write_text(
         json.dumps({"axes": {"x": "x", "y": "y"}, "panels": [SPEED]})
-    )
+    , encoding="utf-8")
     shown = api._view(run, grid)
     assert shown["panels"][0]["show"] == {"op": "magnitude", "of": ["u", "v"]}
     # a block rewrote it: anything not a valid view is dropped for the default
     (run / "task" / view.VIEW_FILE).write_text(
         '{"axes": {"x": "x"}, "panels": [{"show": "<img>"}]}'
-    )
+    , encoding="utf-8")
     assert api._view(run, grid) is None
-    (run / "task" / view.VIEW_FILE).write_text("x" * (view.MAX_BYTES + 10))
+    (run / "task" / view.VIEW_FILE).write_text("x" * (view.MAX_BYTES + 10), encoding="utf-8")
     assert api._view(run, grid) is None
 
 
@@ -156,7 +156,7 @@ def test_the_slider_coordinate_comes_from_the_view_or_the_default(tmp_path):
                 "panels": [{"show": "u"}],
             }
         )
-    )
+    , encoding="utf-8")
     assert viz.step_column(tmp_path, ["x", "y", "z"], ["u"]) == 1
     (tmp_path / view.VIEW_FILE).unlink()
     assert viz.step_column(tmp_path, ["t", "x", "y"], ["u"]) == 0, "a time coordinate slides"

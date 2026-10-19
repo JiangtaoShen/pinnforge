@@ -21,26 +21,35 @@ knowing anything about the multi-task layout above it.
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 
-from pinnforge import charter, gpus, paths
+from pinnforge import charter, gpus, oscompat, paths
 from pinnforge.config import DEFAULT_WALL_BUDGET, RunConfig
 from pinnforge.task import contract, registry
 from pinnforge.types import RunState, utcnow
 
 
 def _link(target: Path, link: Path) -> None:
-    """Point `link` at `target`, replacing a stale link if present."""
-    if link.is_symlink() or link.exists():
-        if link.is_symlink() and Path(os.readlink(link)) == target:
+    """Point `link` at `target`, replacing a stale link if present.
+
+    On Windows without the privilege for symbolic links: a junction for a
+    directory, a hard link for a file (`oscompat`).
+    """
+    if oscompat.is_link(link) or link.exists():
+        if oscompat.is_link(link) and oscompat.read_link(link) == target:
             return
-        if link.is_symlink():
-            link.unlink()
+        if oscompat.is_link(link):
+            if link.is_dir() and not link.is_symlink():
+                link.rmdir()  # a junction
+            else:
+                link.unlink()
         else:
             return  # a real directory was put there deliberately; leave it
-    link.symlink_to(target, target_is_directory=True)
+    if target.is_dir():
+        oscompat.link_dir(target, link)
+    else:
+        oscompat.link_file(target, link)
 
 
 def _copy_corpus(src: Path, dest: Path) -> None:

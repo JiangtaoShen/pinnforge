@@ -22,6 +22,9 @@ created exclusively under temporary names and renamed into place, and the
 index is appended to only if it is a regular file with a single link. If
 anything is not what the archiver made, archiving stops — with a warning,
 never an exception into the daemon.
+
+Windows has no directory descriptors: there a directory is held by its path,
+and every step refuses a link (or junction) where it walks.
 """
 
 from __future__ import annotations
@@ -38,6 +41,8 @@ import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
+
+from pinnforge import oscompat
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +69,57 @@ class Refused(Exception):
     """Something under `.viz/` is not what the archiver made."""
 
 
-def _open_dir(name: str, parent: int | None, *, create: bool, owned: bool) -> int:
+# A directory as this module holds it: a descriptor, or on Windows its path.
+Dir = int | Path
+
+
+def _open_in(parent: Dir, name: str, flags: int, mode: int = 0o644) -> int:
+    """`os.open(name, flags, dir_fd=parent)`, never through a link, never in text mode."""
+    if isinstance(parent, Path):
+        return oscompat.open_file(parent / name, flags, mode)
+    return os.open(name, flags | _NOFOLLOW | _CLOEXEC, mode, dir_fd=parent)
+
+
+def _replace_in(parent: Dir, src: str, dst: str) -> None:
+    if isinstance(parent, Path):
+        oscompat.replace(parent / src, parent / dst)
+    else:
+        os.replace(src, dst, src_dir_fd=parent, dst_dir_fd=parent)
+
+
+def _unlink_in(parent: Dir, name: str) -> None:
+    if isinstance(parent, Path):
+        os.unlink(parent / name)
+    else:
+        os.unlink(name, dir_fd=parent)
+
+
+def _close(d: Dir) -> None:
+    if not isinstance(d, Path):
+        os.close(d)
+
+
+def _open_dir_by_path(name: str, parent: Path | None, *, create: bool) -> Path:
+    """Windows: directory `name` (under `parent`) as a path, never a link or junction."""
+    path = Path(name) if parent is None else parent / name
+    if oscompat.is_link(path):
+        raise Refused(f"{name} is a link")
+    if create:
+        try:
+            path.mkdir(mode=0o755)
+        except FileExistsError:
+            pass
+        except OSError as e:
+            raise Refused(f"cannot create {name}: {e.strerror}") from None
+    if oscompat.is_link(path) or not path.is_dir():
+        raise Refused(f"{name} is not a directory")
+    return path
+
+
+def _open_dir(name: str, parent: Dir | None, *, create: bool, owned: bool) -> Dir:
     """A descriptor on directory `name` (under `parent`), never through a link."""
+    if oscompat.WINDOWS:
+        return _open_dir_by_path(name, parent, create=create)
     if create:
         try:
             os.mkdir(name, 0o755, dir_fd=parent)
@@ -84,12 +138,11 @@ def _open_dir(name: str, parent: int | None, *, create: bool, owned: bool) -> in
     return fd
 
 
-def _write_atomic(dir_fd: int, name: str, write: Callable) -> None:
+def _write_atomic(dir_fd: Dir, name: str, write: Callable) -> None:
     """Create `name` in `dir_fd` whole: a fresh temp file, then a rename over it."""
     tmp = f".tmp-{secrets.token_hex(8)}-{name}"
     try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _CLOEXEC, 0o644,
-                     dir_fd=dir_fd)
+        fd = _open_in(dir_fd, tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
     except OSError as e:
         if e.errno in _PLANTED:
             raise Refused(f"cannot create {tmp}: {e.strerror}") from None
@@ -99,18 +152,17 @@ def _write_atomic(dir_fd: int, name: str, write: Callable) -> None:
             write(fh)
         # rename replaces whatever is at `name` — a planted link included — never
         # writing through it
-        os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        _replace_in(dir_fd, tmp, name)
     except BaseException:
         with suppress(OSError):
-            os.unlink(tmp, dir_fd=dir_fd)
+            _unlink_in(dir_fd, tmp)
         raise
 
 
-def _append(dir_fd: int, name: str, text: str) -> None:
+def _append(dir_fd: Dir, name: str, text: str) -> None:
     """Append to `name` in `dir_fd` — only if it is a regular file with one link."""
     try:
-        fd = os.open(name, os.O_WRONLY | os.O_APPEND | os.O_CREAT | _NOFOLLOW | _NONBLOCK
-                     | _CLOEXEC, 0o644, dir_fd=dir_fd)
+        fd = _open_in(dir_fd, name, os.O_WRONLY | os.O_APPEND | os.O_CREAT | _NONBLOCK)
     except OSError as e:
         if e.errno in _PLANTED:
             raise Refused(f"cannot append to {name}: {e.strerror}") from None
@@ -126,10 +178,10 @@ def _append(dir_fd: int, name: str, text: str) -> None:
         os.close(fd)
 
 
-def _read_index(dir_fd: int) -> str:
+def _read_index(dir_fd: Dir) -> str:
     """The index's text ('' if there is none yet), read the same careful way."""
     try:
-        fd = os.open(INDEX, os.O_RDONLY | _NOFOLLOW | _NONBLOCK | _CLOEXEC, dir_fd=dir_fd)
+        fd = _open_in(dir_fd, INDEX, os.O_RDONLY | _NONBLOCK)
     except FileNotFoundError:
         return ""
     except OSError as e:
@@ -213,9 +265,9 @@ class Archiver:
     # ── where it writes ──
 
     @contextmanager
-    def _dirs(self, frames: bool) -> Iterator[tuple[int, int | None]]:
+    def _dirs(self, frames: bool) -> Iterator[tuple[Dir, Dir | None]]:
         """(`.viz`, `frames` or None) as descriptors, each checked, closed after."""
-        fds: list[int] = []
+        fds: list[Dir] = []
         try:
             run = _open_dir(str(self.run), None, create=False, owned=False)
             fds.append(run)
@@ -228,7 +280,7 @@ class Archiver:
             yield viz, fr
         finally:
             for fd in fds:
-                os.close(fd)
+                _close(fd)
 
     def _refuse(self, why) -> None:
         self.disabled = True
@@ -283,7 +335,7 @@ class Archiver:
         import numpy as np
 
         try:
-            fd = os.open(payload, os.O_RDONLY | _NOFOLLOW | _NONBLOCK | _CLOEXEC)
+            fd = oscompat.open_file(payload, os.O_RDONLY | _NONBLOCK | _CLOEXEC)
         except (OSError, ValueError):
             return None
         with os.fdopen(fd, "rb") as fh:

@@ -102,11 +102,12 @@ def test_the_verdict_publishes_only_what_the_framework_computed(tmp_path):
     v = reference.check(task, task / "private", tol=1e-3, python=sys.executable)
     public = tmp_path / "reference.json"
     reference.record(v, task / "private", public)
-    shown = json.loads(public.read_text())
+    shown = json.loads(public.read_text(encoding="utf-8"))
     assert set(shown) <= set(reference.PUBLIC_KEYS)
     assert "method" not in shown and "levels" not in shown, "the agent's account stays private"
     assert shown["estimate"] == v["estimate"] and shown["n_levels"] == 4
-    kept = json.loads((task / "private" / "reference" / reference.VERDICT).read_text())
+    kept = json.loads((task / "private" / "reference" / reference.VERDICT)
+                      .read_text(encoding="utf-8"))
     assert kept["method"] == "test"
 
 
@@ -168,7 +169,7 @@ def test_an_order_below_one_is_not_taken_as_accurate(tmp_path):
 def test_the_refinement_ratio_must_be_a_usable_number(tmp_path, ratio):
     task = _crafted(tmp_path, _levels_with([1e-3, 2.5e-4]), ratio=ratio)
     if ratio == "empty":
-        (task / "private" / "reference" / "levels.json").write_text("{}")
+        (task / "private" / "reference" / "levels.json").write_text("{}", encoding="utf-8")
     v = reference.check(task, task / "private", rerun=False)
     assert v["verdict"] == "fail"
     assert any("ratio" in r for r in v["reasons"]), v["reasons"]
@@ -225,7 +226,7 @@ def test_the_ingested_grid_is_pinned_and_put_back(tmp_path):
     grid.write_text("x,y\n0,0\n0,1\n1,0\n", encoding="utf-8")  # sorted: misaligned
     assert "no longer the grid" in reference.grid_drift(task, home)
     assert "put back" in reference.grid_drift(task, home, restore=True)
-    assert grid.read_text() == "x,y\n0,0\n1,0\n0,1\n"
+    assert grid.read_text(encoding="utf-8") == "x,y\n0,0\n1,0\n0,1\n"
     assert reference.grid_drift(task, home) == ""
 
 
@@ -322,9 +323,9 @@ def test_a_crashed_stage_says_only_that_it_crashed(tmp_path):
     steps = {s: (lambda: (True, "")) for s in authoring.STAGES}
     steps["reference"] = boom
     assert p.run(steps) == 1
-    text = authoring.state_path(p.task_dir).read_text()
+    text = authoring.state_path(p.task_dir).read_text(encoding="utf-8")
     assert secret not in text and "FileNotFoundError" in text
-    kept = (p.task_dir / "private" / "logs" / authoring.ERROR_LOG).read_text()
+    kept = (p.task_dir / "private" / "logs" / authoring.ERROR_LOG).read_text(encoding="utf-8")
     assert secret in kept and "Traceback" in kept
 
 

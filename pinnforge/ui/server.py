@@ -40,7 +40,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from pinnforge import __version__, paths, settings
+from pinnforge import __version__, oscompat, paths, settings
 from pinnforge.ui import api, safe
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -325,6 +325,22 @@ def _finite(value):
     return value
 
 
+# Windows' SO_REUSEADDR lets a second socket bind a port another process is
+# already listening on, and requests then reach either of them: there a port
+# is taken exclusively. Elsewhere SO_REUSEADDR only skips TIME_WAIT, as meant.
+_BIND_OPT = (getattr(socket, "SO_EXCLUSIVEADDRUSE", None) if oscompat.WINDOWS
+             else socket.SO_REUSEADDR)
+
+
+class _Server(ThreadingHTTPServer):
+    allow_reuse_address = not oscompat.WINDOWS
+
+    def server_bind(self) -> None:
+        if oscompat.WINDOWS and _BIND_OPT is not None:
+            self.socket.setsockopt(socket.SOL_SOCKET, _BIND_OPT, 1)
+        super().server_bind()
+
+
 def make_server(root: Path, host: str, port: int, token: str | None) -> ThreadingHTTPServer:
     api.ROOT_REAL = os.path.realpath(root)
     wide = host in ("0.0.0.0", "::", "")
@@ -332,7 +348,7 @@ def make_server(root: Path, host: str, port: int, token: str | None) -> Threadin
         "root": Path(root), "token": token, "hosts": frozenset(),
         "streams": threading.BoundedSemaphore(MAX_STREAMS),
     })
-    server = ThreadingHTTPServer((host or "0.0.0.0", port), handler)
+    server = _Server((host or "0.0.0.0", port), handler)
     server.daemon_threads = True
     handler.cookie = f"pf_token_{server.server_address[1]}"
     if not wide:
@@ -385,7 +401,7 @@ def _write_private(path: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
-        os.replace(tmp, path)
+        oscompat.replace(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
@@ -404,9 +420,7 @@ def running(root: Path) -> dict | None:
     info = _read_record(state_file(root))
     if info is None:
         return None
-    try:
-        os.kill(int(info.get("pid")), 0)
-    except (OSError, TypeError, ValueError, OverflowError):
+    if not oscompat.pid_alive(info.get("pid")):
         return None
     try:
         host = "127.0.0.1" if info.get("host") in ("0.0.0.0", "::", "") else info["host"]
@@ -422,7 +436,8 @@ def running(root: Path) -> dict | None:
 def _free_port(host: str, start: int) -> int:
     for port in range(start, start + 20):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if _BIND_OPT is not None:
+                s.setsockopt(socket.SOL_SOCKET, _BIND_OPT, 1)
             try:
                 s.bind(("127.0.0.1" if host in LOOPBACK else "", port))
             except OSError:
@@ -441,11 +456,10 @@ def ensure_running(root: Path, host: str | None = None, port: int | None = None)
     port = _free_port(host, int(port or settings.get(root, "ui.port", 8765)))
     log = paths.state_dir(root) / "ui.log"
     with log.open("a", encoding="utf-8") as out:
-        subprocess.Popen(
+        oscompat.popen_detached(
             lifecycle.self_command("--root", str(root), "ui", "--serve", "--host", host,
                                    "--port", str(port)),
             cwd=str(root), stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-            start_new_session=True,
         )
     deadline = time.time() + 10
     while time.time() < deadline:
@@ -459,7 +473,4 @@ def stop(root: Path) -> bool:
     info = running(root)
     if info is None:
         return False
-    import signal
-
-    os.kill(int(info["pid"]), signal.SIGTERM)
-    return True
+    return oscompat.request_stop(info["pid"])

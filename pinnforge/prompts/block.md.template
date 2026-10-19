@@ -57,7 +57,7 @@ on the current best:
 One full evaluation = one GPU training run + rRMSE scoring:
 
     cd <project root>
-    .venv/bin/python task/eval.py blocks/bNN/<name>.py --gpu {{FIRST_GPU}}
+    {{PYTHON}} task/eval.py blocks/bNN/<name>.py --gpu {{FIRST_GPU}}
 
 - Appends a JSON record to `blocks/bNN/evals.jsonl`, saves trained
   params to `blocks/bNN/<name>.pkl`, prints the record.

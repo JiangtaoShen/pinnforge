@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
 
@@ -14,11 +15,16 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def test_the_dev_environment_pins_the_same_stack_a_workspace_gets():
-    """One source of truth: templates/stack.toml, mirrored by the repo's `stack` group."""
+    """One source of truth: templates/stack.toml, mirrored by the repo's `stack` group.
+
+    The CUDA build where JAX has one (Linux), the CPU build everywhere else.
+    """
     s = workspace.stack()
     group = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))[
         "dependency-groups"]["stack"]
-    assert sorted(group) == sorted([*s["common"], *s["cuda12"]])
+    want = [*s["common"], *(f"{d}; sys_platform == 'linux'" for d in s["cuda12"]),
+            *(f"{d}; sys_platform != 'linux'" for d in s["cpu"])]
+    assert sorted(group) == sorted(want)
 
 
 def test_the_workspace_pyproject_pins_and_constrains_the_stack(tmp_path, monkeypatch):
@@ -107,6 +113,10 @@ def test_a_refresh_keeps_the_workspaces_stack(tmp_path, monkeypatch):
     monkeypatch.setattr(workspace, "detect_stack", lambda: "cuda12")
     workspace.init(ws, venv=False, force=True)
     assert workspace.stack_of(ws) == "cpu", "re-detected instead of kept"
+    if os.name == "nt":
+        with pytest.raises(ValueError, match="WSL2"):  # JAX has no CUDA build for Windows
+            workspace.init(ws, stack_name="cuda12", venv=False, force=True)
+        return
     workspace.init(ws, stack_name="cuda12", venv=False, force=True)
     assert workspace.stack_of(ws) == "cuda12", "an explicit stack still switches it"
 

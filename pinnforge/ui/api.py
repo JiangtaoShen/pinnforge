@@ -22,7 +22,6 @@ the scalars in `.authoring/reference.json`.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import io
 import json
 import logging
@@ -34,7 +33,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from pinnforge import __version__, gpus, paths
+from pinnforge import __version__, gpus, oscompat, paths
 from pinnforge.run import lifecycle
 from pinnforge.ui import safe
 
@@ -202,7 +201,8 @@ def gpu_stats() -> list[dict]:
              "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,"
              "power.draw",
              "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=5, check=False,
         )
         for line in out.stdout.splitlines():
             p = [x.strip() for x in line.split(",")]
@@ -227,15 +227,7 @@ def gpu_stats() -> list[dict]:
 def _pid_alive(pid) -> bool:
     if isinstance(pid, bool) or not isinstance(pid, int) or not 0 < pid < 2**31:
         return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
+    return oscompat.pid_alive(pid)
 
 
 def _leases(pool: list[int]) -> dict[int, str]:
@@ -285,7 +277,7 @@ def _live(run: Path) -> bool:
     if fd is None:
         return False
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        oscompat.lock(fd, block=False)
     except BlockingIOError:
         return True
     except OSError:
@@ -297,7 +289,7 @@ def _live(run: Path) -> bool:
             return False
         return isinstance(info, dict) and _pid_alive(info.get("pid"))
     else:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        oscompat.unlock(fd)
         return False
     finally:
         os.close(fd)

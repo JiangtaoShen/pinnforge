@@ -73,7 +73,7 @@ def test_anchor_is_harvested_from_a_matching_run(tmp_path, monkeypatch):
     cache = anchor.cache_dir("toy", root)
     for f in (*anchor.ANCHOR_FILES, "b00.md", "meta.json"):
         assert (cache / f).is_file(), f
-    assert json.loads((cache / "meta.json").read_text())["rRMSE"] == 0.37
+    assert json.loads((cache / "meta.json").read_text(encoding="utf-8"))["rRMSE"] == 0.37
 
 
 def test_a_run_of_different_contract_files_is_not_harvested(tmp_path, monkeypatch):

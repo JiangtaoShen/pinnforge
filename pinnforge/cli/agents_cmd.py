@@ -7,7 +7,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from pinnforge import bindings
+from pinnforge import bindings, oscompat
 from pinnforge.config import AgentConfig
 from pinnforge.runtime import registry
 
@@ -49,7 +49,8 @@ def ping(agent: AgentConfig, timeout: float = 120.0) -> tuple[bool, str, str]:
     except (KeyError, ValueError) as e:
         return False, str(e).strip('"'), ""
     started = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix="pinnforge-ping-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="pinnforge-ping-",
+                                     ignore_cleanup_errors=True) as tmp:
         log = Path(tmp) / "ping.log"
         try:
             handle = runtime.start(
@@ -109,7 +110,8 @@ def cmd_doctor(args) -> int:
             continue
         try:
             out = subprocess.run(
-                [cmd, "--version"], capture_output=True, text=True, timeout=args.timeout
+                oscompat.resolve_command([cmd, "--version"]), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=args.timeout
             )
             version = (out.stdout or out.stderr).strip().splitlines()
             version = version[0] if version else "(no version output)"

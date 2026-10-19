@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,8 +45,13 @@ class Gpu:
 
 
 def inventory(timeout: float = 20.0) -> list[Gpu]:
-    """Every GPU `nvidia-smi` can see, in its (PCI) order. Empty if none."""
-    if not shutil.which("nvidia-smi"):
+    """Every GPU `nvidia-smi` can see, in its (PCI) order. Empty if none.
+
+    Empty on Windows too, card or no card: JAX has no CUDA build there, so a
+    card a run cannot train on is not one to offer it (`windows_cards` says
+    whether there is one, for the advice to use WSL2).
+    """
+    if sys.platform == "win32" or not shutil.which("nvidia-smi"):
         return []
     try:
         out = subprocess.run(
@@ -56,6 +62,8 @@ def inventory(timeout: float = 20.0) -> list[Gpu]:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
         )
@@ -73,6 +81,23 @@ def inventory(timeout: float = 20.0) -> list[Gpu]:
         except ValueError:
             continue
     return gpus
+
+
+def windows_cards(timeout: float = 20.0) -> list[str]:
+    """The NVIDIA cards of a Windows machine: there, but only WSL2 can train on them."""
+    if sys.platform != "win32" or not shutil.which("nvidia-smi"):
+        return []
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout, check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return []
+    if out.returncode != 0:
+        return []
+    return [ln.strip() for ln in out.stdout.splitlines() if ln.strip()]
 
 
 def visible(env: dict[str, str] | None = None, inv: list[Gpu] | None = None) -> list[int] | None:
@@ -107,7 +132,8 @@ def usage(timeout: float = 10.0) -> dict[int, tuple[int, int]]:
         out = subprocess.run(
             ["nvidia-smi", "--query-gpu=index,memory.used,utilization.gpu",
              "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=timeout, check=False,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout, check=False,
         )
     except (subprocess.SubprocessError, OSError):
         return {}

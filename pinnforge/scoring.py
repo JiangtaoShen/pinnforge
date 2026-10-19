@@ -52,7 +52,6 @@ when a private directory is configured, otherwise `tasks/<task>/private/`.
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import importlib.util
 import json
@@ -69,6 +68,8 @@ from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from pinnforge import oscompat
 
 QUEUE = ".scoreq"
 PROTOCOL = 1  # bumped when the request/response shape changes
@@ -129,7 +130,7 @@ def standalone_serving(run: Path) -> bool:
     """
     lock = Path(run) / QUEUE / "scored.lock"
     try:
-        fd = os.open(lock, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = oscompat.open_file(lock, os.O_RDONLY)
     except FileNotFoundError:
         return False
     except OSError:
@@ -137,13 +138,13 @@ def standalone_serving(run: Path) -> bool:
         # heartbeat, which is the only other evidence there is.
         return scorer_alive(run)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        oscompat.lock(fd, block=False)
     except BlockingIOError:
         return True
     except OSError:
         return scorer_alive(run)
     else:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        oscompat.unlock(fd)
         return False
     finally:
         os.close(fd)
@@ -194,11 +195,17 @@ def submit_score(run: Path, meta: dict[str, Any], pred_path: Path, wait_s: float
 
 
 def _open_regular(path: Path) -> int:
-    """Open `path` read-only, refusing symlinks and anything but a regular file."""
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    """Open `path` read-only, refusing links and anything but a regular file.
+
+    A hard link too: what a client files has one name, and a second is one a
+    block gave it — on Windows, where no privilege guards hard links as Linux's
+    `protected_hardlinks` does, to the answers as easily as anything else.
+    """
+    fd = oscompat.open_file(path, os.O_RDONLY)
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise OSError(f"{path.name} is not a regular file")
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+            raise OSError(f"{path.name} is not a regular, singly linked file")
     except BaseException:
         os.close(fd)
         raise
@@ -222,7 +229,7 @@ def _write_atomic(dest: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
-        os.replace(tmp, dest)
+        oscompat.replace(tmp, dest)
     except BaseException:
         with suppress(OSError):
             os.unlink(tmp)
@@ -231,7 +238,7 @@ def _write_atomic(dest: Path, text: str) -> None:
 
 def _append_line(path: Path, line: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+    fd = oscompat.open_file(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
     with os.fdopen(fd, "a", encoding="utf-8") as fh:
         fh.write(line + "\n")
 
@@ -239,13 +246,13 @@ def _append_line(path: Path, line: str) -> None:
 def _beat(path: Path) -> None:
     """Touch the heartbeat without following a link planted in its place."""
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+        fd = oscompat.open_file(path, os.O_WRONLY | os.O_CREAT, 0o644)
     except OSError:
         with suppress(OSError):
             path.unlink()
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+        fd = oscompat.open_file(path, os.O_WRONLY | os.O_CREAT, 0o644)
     try:
-        os.utime(fd)
+        os.utime(fd if os.utime in os.supports_fd else path)  # Windows: by name, once opened
     finally:
         os.close(fd)
 
@@ -648,16 +655,16 @@ def _hold_lock(path: Path) -> int | None:
     idempotent — but only the first one's lock says "someone is serving".
     """
     try:
-        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+        fd = oscompat.open_file(path, os.O_RDWR | os.O_CREAT, 0o644)
     except OSError:
         with suppress(OSError):
             path.unlink()
         try:
-            fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+            fd = oscompat.open_file(path, os.O_RDWR | os.O_CREAT, 0o644)
         except OSError:
             return None
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        oscompat.lock(fd, block=False)
     except OSError:
         os.close(fd)
         return None

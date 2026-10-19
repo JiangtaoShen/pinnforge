@@ -114,6 +114,23 @@ def charter_template(root: Path | None = None) -> Path:
     return prompts_dir() / "block.md.template"
 
 
+def local_path(location: str) -> str:
+    """A local path, from itself or from a `file://` URL (`file:///D:/x` is `D:\\x` on Windows)."""
+    if not location.startswith("file://"):
+        return location
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
+
+    return url2pathname(urlparse(location).path)
+
+
+def venv_bin(venv: Path, name: str = "python") -> Path:
+    """Program `name` of virtual environment `venv`: `bin/name`, on Windows `Scripts/name.exe`."""
+    if os.name == "nt":
+        return Path(venv) / "Scripts" / f"{name}.exe"
+    return Path(venv) / "bin" / name
+
+
 def venv_python(root: Path | None = None) -> Path:
     """Interpreter the task's `eval.py` runs under.
 
@@ -124,7 +141,7 @@ def venv_python(root: Path | None = None) -> Path:
     falls back, so validation and tests work there.
     """
     root = root or project_root()
-    cand = root / ".venv" / "bin" / "python"
+    cand = venv_bin(root / ".venv")
     if cand.is_file():
         return cand
     if is_workspace(root) and not os.environ.get("PINNFORGE_AMBIENT_PYTHON"):

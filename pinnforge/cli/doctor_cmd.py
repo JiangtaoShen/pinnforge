@@ -64,7 +64,8 @@ def _pins() -> dict[str, str]:
 def _probe(python: Path, timeout: float = 180.0) -> dict:
     try:
         out = subprocess.run(
-            [str(python), "-c", PROBE], capture_output=True, text=True, timeout=timeout,
+            [str(python), "-c", PROBE], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout,
             check=False,
         )
     except subprocess.TimeoutExpired:
@@ -148,7 +149,7 @@ def checks(ping: bool = False) -> list[Finding]:
     readable = not broken
 
     # ── environment ──
-    python = root / ".venv" / "bin" / "python"
+    python = paths.venv_bin(root / ".venv")
     if not python.is_file():
         add(Finding("fail", "environment", f"no {root / '.venv'}",
                     "pinnforge workspace sync" if marked else "uv sync"))
@@ -183,6 +184,11 @@ def checks(ping: bool = False) -> list[Finding]:
     if readable:
         _gpu_checks(out, root, inv)
         pool = _pool_or(root, inv, pool)
+        if cards := gpus.windows_cards():
+            add(Finding("warn", "gpus",
+                        f"{', '.join(cards)}: JAX has no CUDA build for Windows, so runs here "
+                        "train on the CPU",
+                        "run PINNForge inside WSL2 to train on the card"))
         _agent_checks(out, root, ping)
     _task_checks(out, root, pool, inv)
 
@@ -195,11 +201,23 @@ def checks(ping: bool = False) -> list[Finding]:
                         f"create it, or unset private_dir in {src}"))
 
     # ── extras ──
-    if shutil.which("tmux"):
+    if sys.platform == "win32":
+        add(Finding("ok", "detach", "detached runs go to the background, with a log "
+                    "(`pinnforge run attach` follows it)"))
+    elif shutil.which("tmux"):
         add(Finding("ok", "tmux", "runs detach into tmux sessions"))
     else:
         add(Finding("warn", "tmux", "not installed — detached runs fall back to a log file",
                     "install tmux (e.g. `sudo apt install tmux`)"))
+    if not shutil.which("git"):
+        # the frozen stack pins one package to a git commit, and a workspace
+        # installs PINNForge itself from its repository
+        add(Finding("warn", "git", "not installed — `pinnforge workspace sync` needs it",
+                    "winget install Git.Git" if sys.platform == "win32"
+                    else "install git (e.g. `sudo apt install git`)"))
+    elif sys.platform == "win32" and _git_bash() is None:
+        add(Finding("warn", "git bash", "not found — Claude Code on Windows runs its shell in it",
+                    "install Git for Windows, or set CLAUDE_CODE_GIT_BASH_PATH"))
     if readable:
         _dashboard_check(out, root)
     kb1 = paths.kb1_dir(root)
@@ -221,6 +239,19 @@ def _pool_or(root: Path, inv: list[gpus.Gpu] | None, fallback: list[int]) -> lis
         return gpus.workspace_pool(root, inv)
     except ValueError:
         return fallback
+
+
+def _git_bash() -> Path | None:
+    """Git for Windows' bash — not `System32\\bash.exe`, which is WSL's."""
+    if configured := os.environ.get("CLAUDE_CODE_GIT_BASH_PATH"):
+        return Path(configured) if Path(configured).is_file() else None
+    git = shutil.which("git")
+    if git is None:
+        return None
+    for base in Path(git).resolve().parents:  # …\Git\cmd\git.exe, …\Git\mingw64\bin\git.exe
+        if (base / "bin" / "bash.exe").is_file():
+            return base / "bin" / "bash.exe"
+    return None
 
 
 def _gpu_checks(out: list[Finding], root: Path, inv: list[gpus.Gpu]) -> None:
@@ -246,7 +277,7 @@ def _gpu_checks(out: list[Finding], root: Path, inv: list[gpus.Gpu]) -> None:
         add(Finding("warn", "gpus", "GPUs exist but none is in the pool "
                     "(CUDA_VISIBLE_DEVICES excludes them)",
                     "unset CUDA_VISIBLE_DEVICES, or choose cards: pinnforge setup gpus"))
-    else:
+    elif not gpus.windows_cards():  # a Windows card has had its own finding
         add(Finding("warn", "gpus", "no NVIDIA GPU visible — runs train on the CPU "
                     "(fine for the demo, slow for real tasks)"))
 

@@ -23,7 +23,7 @@ CANARY = "CANARY-7f3e91"
 
 
 @pytest.fixture()
-def ws(tmp_path):
+def ws(tmp_path, plant):
     root = tmp_path / "ws"
     (root / "tasks" / "toy" / "private").mkdir(parents=True)
     (root / "pinnforge.yaml").write_text("version: 1\n", encoding="utf-8")
@@ -54,9 +54,9 @@ def ws(tmp_path):
         encoding="utf-8")
     # a block plants links at the answers, where the dashboard reads
     (run / "blocks" / "b02").mkdir()
-    (run / "blocks" / "b02" / "evals.jsonl").symlink_to(task / "private" / "secret.md")
-    (run / "blocks" / "kb2" / "b02.md").symlink_to(task / "private" / "secret.md")
-    (run / ".viz").symlink_to(task / "private")
+    plant(run / "blocks" / "b02" / "evals.jsonl", task / "private" / "secret.md")
+    plant(run / "blocks" / "kb2" / "b02.md", task / "private" / "secret.md")
+    plant(run / ".viz", task / "private")
     return root
 
 
@@ -191,7 +191,8 @@ def test_only_improvements_are_archived(tmp_path):
     for block, score in (("b01", 0.5), ("b01", 0.6), ("b01", 0.4), ("b02", 0.45), ("b02", 0.3)):
         arch({"block": block, "candidate": "c", "smoke": False}, {"rRMSE": score}, pay)
     arch({"block": "b03", "smoke": True}, {"rRMSE": 0.01}, pay)
-    index = [json.loads(ln) for ln in (run / ".viz" / "index.jsonl").read_text().splitlines()]
+    text = (run / ".viz" / "index.jsonl").read_text(encoding="utf-8")
+    index = [json.loads(ln) for ln in text.splitlines()]
     assert [r["rRMSE"] for r in index] == [0.5, 0.4, 0.45, 0.3]
     assert [r["run_best"] for r in index] == [True, True, False, True]
     assert len(list((run / ".viz" / "frames").glob("*.npz"))) == 4

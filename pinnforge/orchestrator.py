@@ -154,6 +154,8 @@ def gpu_healthy(gpus: list[int]) -> bool:
             ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
             check=False,
         )

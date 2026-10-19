@@ -18,6 +18,9 @@ import pytest
 
 from pinnforge.ui import viz
 
+needs_fifo = pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs on this system")
+posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX ownership")
+
 COORDS = np.stack(np.meshgrid(np.linspace(0, 1, 20), np.linspace(0, 1, 20)), -1).reshape(-1, 2)
 
 
@@ -73,14 +76,15 @@ def _req(block="b01", candidate="blocks/b01/b01_a.py", **kw):
 
 def _untouched(d):
     assert sorted(p.name for p in d.iterdir()) == ["precious.txt"]
-    assert (d / "precious.txt").read_text() == "untouched"
+    assert (d / "precious.txt").read_text(encoding="utf-8") == "untouched"
 
 
 def test_archiving_works_normally(run, payload):
     arch = viz.Archiver(run, COORDS, 2, ["u"])
     arch(_req(), {"rRMSE": 0.5}, payload)
     arch(_req(), {"rRMSE": 0.4}, payload)
-    index = [json.loads(x) for x in (run / ".viz" / "index.jsonl").read_text().splitlines()]
+    text = (run / ".viz" / "index.jsonl").read_text(encoding="utf-8")
+    index = [json.loads(x) for x in text.splitlines()]
     assert [r["frame"] for r in index] == [0, 1]
     assert index[0]["candidate"] == "blocks/b01/b01_a.py" and index[0]["seed"] == "0"
     assert sorted(p.name for p in (run / ".viz" / "frames").iterdir()) == \
@@ -90,8 +94,8 @@ def test_archiving_works_normally(run, payload):
     assert again.count == 2 and again.best_run == 0.4 and not again.disabled
 
 
-def test_a_symlinked_viz_dir_is_refused(run, payload, elsewhere):
-    (run / ".viz").symlink_to(elsewhere)
+def test_a_symlinked_viz_dir_is_refused(run, payload, elsewhere, plant):
+    plant(run / ".viz", elsewhere)
     arch = viz.Archiver(run, COORDS, 2, ["u"])  # must not raise
     assert arch.disabled
     arch(_req(), {"rRMSE": 0.1}, payload)
@@ -103,9 +107,10 @@ def test_a_viz_path_that_is_a_file_is_refused(run, payload):
     arch = viz.Archiver(run, COORDS, 2, ["u"])
     assert arch.disabled
     arch(_req(), {"rRMSE": 0.1}, payload)
-    assert (run / ".viz").read_text() == "not a dir"
+    assert (run / ".viz").read_text(encoding="utf-8") == "not a dir"
 
 
+@posix_only
 def test_a_viz_dir_owned_by_someone_else_is_refused(run, payload, monkeypatch):
     (run / ".viz").mkdir()
     euid = os.geteuid()
@@ -115,9 +120,9 @@ def test_a_viz_dir_owned_by_someone_else_is_refused(run, payload, monkeypatch):
     assert list((run / ".viz").iterdir()) == []
 
 
-def test_symlinked_frames_dir_is_refused(run, payload, elsewhere):
+def test_symlinked_frames_dir_is_refused(run, payload, elsewhere, plant):
     (run / ".viz").mkdir()
-    (run / ".viz" / "frames").symlink_to(elsewhere)
+    plant(run / ".viz" / "frames", elsewhere)
     arch = viz.Archiver(run, COORDS, 2, ["u"])
     arch(_req(), {"rRMSE": 0.1}, payload)
     assert arch.disabled
@@ -125,19 +130,19 @@ def test_symlinked_frames_dir_is_refused(run, payload, elsewhere):
     assert not (run / ".viz" / "index.jsonl").exists()
 
 
-def test_a_symlinked_index_is_refused(run, payload, elsewhere):
+def test_a_symlinked_index_is_refused(run, payload, elsewhere, plant):
     (run / ".viz").mkdir()
-    (run / ".viz" / "index.jsonl").symlink_to(elsewhere / "precious.txt")
+    plant(run / ".viz" / "index.jsonl", elsewhere / "precious.txt")
     arch = viz.Archiver(run, COORDS, 2, ["u"])
     assert arch.disabled
     arch(_req(), {"rRMSE": 0.1}, payload)
     _untouched(elsewhere)
 
 
-def test_an_index_linked_after_start_is_not_appended_through(run, payload, elsewhere):
+def test_an_index_linked_after_start_is_not_appended_through(run, payload, elsewhere, plant):
     arch = viz.Archiver(run, COORDS, 2, ["u"])
     assert not arch.disabled
-    (run / ".viz" / "index.jsonl").symlink_to(elsewhere / "precious.txt")
+    plant(run / ".viz" / "index.jsonl", elsewhere / "precious.txt")
     arch(_req(), {"rRMSE": 0.1}, payload)
     assert arch.disabled
     _untouched(elsewhere)
@@ -148,7 +153,7 @@ def test_a_hard_linked_index_is_refused(run, payload, elsewhere):
     os.link(elsewhere / "precious.txt", run / ".viz" / "index.jsonl")
     arch(_req(), {"rRMSE": 0.1}, payload)
     assert arch.disabled
-    assert (elsewhere / "precious.txt").read_text() == "untouched"
+    assert (elsewhere / "precious.txt").read_text(encoding="utf-8") == "untouched"
     os.unlink(run / ".viz" / "index.jsonl")
     (run / ".viz").rename(run / ".viz.old")
     (run / ".viz.old" / "frames").mkdir(exist_ok=True)
@@ -157,6 +162,7 @@ def test_a_hard_linked_index_is_refused(run, payload, elsewhere):
     assert viz.Archiver(run, COORDS, 2, ["u"]).disabled  # read refused too
 
 
+@needs_fifo
 def test_a_fifo_index_neither_hangs_the_start_nor_the_append(run, payload):
     (run / ".viz").mkdir()
     fifo = run / ".viz" / "index.jsonl"
@@ -183,10 +189,10 @@ def test_a_fifo_index_neither_hangs_the_start_nor_the_append(run, payload):
 
 
 def test_files_planted_at_output_names_are_replaced_not_written_through(run, payload,
-                                                                        elsewhere):
+                                                                        elsewhere, plant):
     (run / ".viz" / "frames").mkdir(parents=True)
-    (run / ".viz" / "grid.npz").symlink_to(elsewhere / "precious.txt")
-    (run / ".viz" / "frames" / "00000.npz").symlink_to(elsewhere / "precious.txt")
+    plant(run / ".viz" / "grid.npz", elsewhere / "precious.txt")
+    plant(run / ".viz" / "frames" / "00000.npz", elsewhere / "precious.txt")
     arch = viz.Archiver(run, COORDS, 2, ["u"])
     arch(_req(), {"rRMSE": 0.1}, payload)
     assert not arch.disabled
@@ -212,17 +218,18 @@ def test_names_from_the_request_are_validated_before_they_are_written(run, paylo
 def test_an_empty_candidate_is_kept_as_empty(run, payload):
     arch = viz.Archiver(run, COORDS, 2, ["u"])
     arch(_req(candidate=""), {"rRMSE": 0.1}, payload)
-    entry = json.loads((run / ".viz" / "index.jsonl").read_text())
+    entry = json.loads((run / ".viz" / "index.jsonl").read_text(encoding="utf-8"))
     assert entry["candidate"] == "" and entry["block"] == "b01"
 
 
-def test_a_payload_that_is_a_fifo_link_or_hard_link_is_skipped(run, payload, tmp_path):
+def test_a_payload_that_is_a_fifo_link_or_hard_link_is_skipped(run, payload, tmp_path, plant):
     arch = viz.Archiver(run, COORDS, 2, ["u"])
-    fifo = tmp_path / "queue" / "fifo.npz"
-    os.mkfifo(fifo)
-    _within(lambda: arch(_req(), {"rRMSE": 0.1}, fifo), fifos=[fifo])
+    if hasattr(os, "mkfifo"):
+        fifo = tmp_path / "queue" / "fifo.npz"
+        os.mkfifo(fifo)
+        _within(lambda: arch(_req(), {"rRMSE": 0.1}, fifo), fifos=[fifo])
     link = tmp_path / "queue" / "link.npz"
-    link.symlink_to(payload)
+    plant(link, payload)
     arch(_req(), {"rRMSE": 0.1}, link)
     os.link(payload, tmp_path / "queue" / "twin.npz")
     arch(_req(), {"rRMSE": 0.1}, payload)
@@ -244,21 +251,21 @@ def test_malformed_index_lines_are_skipped_on_replay(run):
     assert arch.count == 5 and arch.best_run == 0.2 and arch.best_block == {"b01": 0.2}
 
 
-def test_archiver_for_writes_grid_json_without_following_links(run, tmp_path, elsewhere):
+def test_archiver_for_writes_grid_json_without_following_links(run, tmp_path, elsewhere, plant):
     csv = tmp_path / "grid.csv"
     csv.write_text("x,y\n" + "\n".join(f"{a},{b}" for a, b in COORDS), encoding="utf-8")
     metric = types.SimpleNamespace(module=types.SimpleNamespace(
         GRID_CSV=str(csv), FIELDS=["u"], INPUT_COLUMNS=2))
     (run / ".viz").mkdir()
-    (run / ".viz" / "grid.json").symlink_to(elsewhere / "precious.txt")
+    plant(run / ".viz" / "grid.json", elsewhere / "precious.txt")
     arch = viz.archiver_for(run, metric)
     assert arch is not None
     _untouched(elsewhere)
-    grid = json.loads((run / ".viz" / "grid.json").read_text())
+    grid = json.loads((run / ".viz" / "grid.json").read_text(encoding="utf-8"))
     assert grid["coords"] == ["x", "y"] and grid["points"] == len(COORDS)
     # and with .viz itself planted, there is simply no archiver
     other = tmp_path / "runs" / "toy_2"
     other.mkdir()
-    (other / ".viz").symlink_to(elsewhere)
+    plant(other / ".viz", elsewhere)
     assert viz.archiver_for(other, metric) is None
     _untouched(elsewhere)

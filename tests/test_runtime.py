@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from pinnforge import oscompat
 from pinnforge.runtime import registry
 from pinnforge.runtime.base import AgentRuntime, clean_env
 
@@ -300,6 +301,7 @@ def _spawn_tree(tmp_path, marker: Path):
     holds the GPU lock. The grandchild writes `marker` while it lives, so a
     survivor is detectable without inspecting pids.
     """
+    import os
     import subprocess
     import sys
     import time
@@ -309,13 +311,16 @@ def _spawn_tree(tmp_path, marker: Path):
     child = (
         "import subprocess,sys,time;"
         f"subprocess.Popen([sys.executable,'-c',\"import time,pathlib;"
-        f"pathlib.Path(r'{marker}').write_text('alive');time.sleep(60)\"]);"
+        f"pathlib.Path(r'{marker.as_posix()}').write_text('alive');time.sleep(60)\"]);"
         "time.sleep(60)"
     )
+    # A bare environment — but Windows starts no process without SYSTEMROOT.
+    env = {"PATH": "/usr/bin:/bin"} if os.name != "nt" else {
+        k: os.environ[k] for k in ("PATH", "SYSTEMROOT") if k in os.environ}
     handle = spawn(
         [sys.executable, "-c", child],
         cwd=tmp_path,
-        env={"PATH": "/usr/bin:/bin"},
+        env=env,
         log_path=tmp_path / "agent.log",
         block_id="b01",
     )
@@ -335,17 +340,16 @@ def test_interrupt_takes_down_the_whole_process_tree(tmp_path):
     orchestrator reaches the block. `interrupt()` addresses the group, which
     is the only thing that also gets the training worker underneath it.
     """
-    import os
 
     marker = tmp_path / "worker.txt"
     handle, _ = _spawn_tree(tmp_path, marker)
-    pgid = os.getpgid(handle.process.pid)
+    pgid = oscompat.getpgid(handle.process.pid)
 
     handle.interrupt(grace=10.0)
 
     assert not handle.alive
     with pytest.raises(ProcessLookupError):
-        os.killpg(pgid, 0)  # the worker underneath is gone too, not orphaned
+        oscompat.killpg(pgid, 0)  # the worker underneath is gone too, not orphaned
 
 
 def test_ctrl_c_during_a_block_does_not_leave_the_agent_running(tmp_path, monkeypatch):
@@ -355,7 +359,6 @@ def test_ctrl_c_during_a_block_does_not_leave_the_agent_running(tmp_path, monkey
     workspace, both appending to one `evals.jsonl` and contending for one GPU
     lock — while the README promises an interrupt and a crash end the same way.
     """
-    import os
 
     from pinnforge.config import RunConfig
     from pinnforge.orchestrator import Orchestrator
@@ -363,7 +366,7 @@ def test_ctrl_c_during_a_block_does_not_leave_the_agent_running(tmp_path, monkey
 
     marker = tmp_path / "worker.txt"
     handle, _ = _spawn_tree(tmp_path, marker)
-    pgid = os.getpgid(handle.process.pid)
+    pgid = oscompat.getpgid(handle.process.pid)
 
     cfg = RunConfig(task="ldc")
     orch = Orchestrator.__new__(Orchestrator)  # no run directory needed
@@ -381,7 +384,7 @@ def test_ctrl_c_during_a_block_does_not_leave_the_agent_running(tmp_path, monkey
 
     assert not handle.alive, "the block must not survive the interrupt"
     with pytest.raises(ProcessLookupError):
-        os.killpg(pgid, 0)
+        oscompat.killpg(pgid, 0)
 
 
 def test_opencode_session_id_comes_out_of_logfmt(tmp_path):

@@ -8,6 +8,7 @@ executes candidate code, reading a reference the block cannot open.
 from __future__ import annotations
 
 import json
+import os
 import threading
 
 import numpy as np
@@ -62,7 +63,7 @@ def test_wrong_shape_is_an_error_not_a_crash(project):
     result = scoring.score_request(project, None, req, {"task": "toy", "pred": "abc.npz"})
     assert result == {"error": scoring.UNSCORABLE}, "the metric's own words stay inside"
     note = project / "tasks" / "toy" / "private" / "logs" / "score-errors.jsonl"
-    assert "(3,) != (10,)" in note.read_text(), "the operator still gets them"
+    assert "(3,) != (10,)" in note.read_text(encoding="utf-8"), "the operator still gets them"
 
 
 def test_an_rrmse_is_all_the_service_ever_returns(project):
@@ -86,7 +87,7 @@ def test_a_metric_that_raises_says_nothing_about_the_reference(project):
     np.savez(req / "abc.npz", u=np.zeros(10))
     result = scoring.score_request(project, None, req, {"task": "toy", "pred": "abc.npz"})
     assert result == {"error": scoring.UNSCORABLE}
-    assert "10.0" in (task / "private" / "logs" / "score-errors.jsonl").read_text()
+    assert "10.0" in (task / "private" / "logs" / "score-errors.jsonl").read_text(encoding="utf-8")
 
 
 def test_a_malformed_submission_is_explained_from_the_public_grid(project):
@@ -254,7 +255,7 @@ def test_a_dead_daemons_heartbeat_is_not_a_daemon(project):
         assert stop is not None, "nobody holds the lock, so this process must serve"
 
 
-def test_a_planted_symlink_is_not_followed(project, tmp_path):
+def test_a_planted_symlink_is_not_followed(project, tmp_path, plant):
     """The queue is the block's to write; the daemon must not write through it."""
     run = project / "runs" / "toy_1"
     run.mkdir(parents=True)
@@ -266,12 +267,12 @@ def test_a_planted_symlink_is_not_followed(project, tmp_path):
         json.dumps({"task": "toy", "run": "toy_1", "block": "b01", "pred": "r0.npz"}),
         encoding="utf-8",
     )
-    (res / "r0.json").symlink_to(victim)  # a planted answer file
+    plant(res / "r0.json", victim)  # a planted answer file
     (req / "r1.json").write_text(
         json.dumps({"task": "toy", "run": "toy_1", "block": "b01", "pred": "link.npz"}),
         encoding="utf-8",
     )
-    (req / "link.npz").symlink_to(project / "tasks" / "toy" / "private" / "ref_values.npy")
+    plant(req / "link.npz", project / "tasks" / "toy" / "private" / "ref_values.npy")
     scoring.serve(project, run, once=True)
     assert victim.read_text(encoding="utf-8") == "untouched"
     answer = json.loads((res / "r1.json").read_text(encoding="utf-8"))
@@ -413,7 +414,10 @@ def test_a_deleted_queue_does_not_end_the_service(project):
     pred = run / "pred.npz"
     np.savez(pred, u=np.arange(10, dtype=np.float64) + 1.0)
     with scoring.serving(project, run) as server:
-        shutil.rmtree(run / scoring.QUEUE)
+        # Windows keeps a file someone has open — the daemon's own lock — and
+        # deletes the rest; the request and result directories go either way.
+        shutil.rmtree(run / scoring.QUEUE, ignore_errors=os.name == "nt")
+        assert not (run / scoring.QUEUE / "req").exists()
         threading.Event().wait(1.0)  # a pass or two over a queue that is gone
         assert server.alive()
         out = scoring.submit_score(run, {"task": "toy", "run": "toy_1", "block": "b01"}, pred,

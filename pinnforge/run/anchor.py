@@ -13,7 +13,6 @@ got a different number of steps.
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -25,7 +24,7 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 
-from pinnforge import gpus, paths, private
+from pinnforge import gpus, oscompat, paths, private
 from pinnforge.task import registry
 from pinnforge.types import RECORD_KEYS, EvalRecord, best_score
 
@@ -55,8 +54,8 @@ def _locked(task: str, root: Path | None = None):
     """
     locks = paths.state_dir(root) / "locks"
     locks.mkdir(parents=True, exist_ok=True)
-    with open(locks / f"anchor-{task}.lock", "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+    with open(locks / f"anchor-{task}.lock", "a", encoding="utf-8") as f:
+        oscompat.lock(f)
         yield
 
 
@@ -80,7 +79,7 @@ def _copy_records(src: Path, dest: Path) -> None:
             out.append(json.dumps({k: v for k, v in rec.items() if k in RECORD_KEYS}))
     tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
     tmp.write_text("".join(f"{ln}\n" for ln in out), encoding="utf-8")
-    tmp.replace(dest)
+    oscompat.replace(tmp, dest)
 
 
 def _copy_anchor_file(src: Path, dest: Path) -> None:
@@ -222,30 +221,33 @@ def _run_group(cmd: list[str], cwd: Path, env: dict | None = None) -> subprocess
     pre-charged and never reconciled — after a Ctrl-C or a `run stop` during
     the anchor measurement.
     """
-    proc = subprocess.Popen(
+    proc = oscompat.popen_group(
         cmd,
         cwd=str(cwd),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        start_new_session=True,
+        encoding="utf-8",
+        errors="replace",
         env=env,
     )
     try:
         out, err = proc.communicate()
     except BaseException:
         pgid = proc.pid
-        for sig, grace in ((signal.SIGTERM, 10.0), (signal.SIGKILL, 5.0)):
+        for sig, grace in ((signal.SIGTERM, 10.0), (oscompat.SIGKILL, 5.0)):
             with suppress(ProcessLookupError, PermissionError):
-                os.killpg(pgid, sig)
+                oscompat.killpg(pgid, sig)
             try:
                 proc.wait(timeout=grace)
                 break
             except subprocess.TimeoutExpired:
                 continue
         with suppress(ProcessLookupError, PermissionError):
-            os.killpg(pgid, signal.SIGKILL)  # the worker may outlive eval.py
+            oscompat.killpg(pgid, oscompat.SIGKILL)  # the worker may outlive eval.py
         raise
+    finally:
+        oscompat.forget_group(proc.pid)
     return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 
@@ -261,7 +263,7 @@ def measure(run: Path, root: Path | None = None, gpu: int | str | None = 0) -> A
     shutil.copy2(run / "task" / "baseline.py", candidate)
 
     python = paths.venv_python(root)
-    rel = str(candidate.relative_to(run))
+    rel = candidate.relative_to(run).as_posix()
     # the record is the verdict; the exit status is inspected below
     smoke = _run_group([str(python), "task/eval.py", rel, "--smoke"], run)
     if smoke.returncode != 0:
@@ -423,7 +425,8 @@ def _rekey(
     proc = subprocess.run(
         [str(paths.venv_python(root)), "task/eval.py", "--worker-eval",
          str(b00 / "b00_v01.py"), str(b00 / "b00_v01.pkl")],
-        cwd=str(run), env=env, capture_output=True, text=True, check=False, timeout=600,
+        cwd=str(run), env=env, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=False, timeout=600,
     )
     lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
     try:
