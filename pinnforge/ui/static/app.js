@@ -8,7 +8,7 @@
   // ───────────────────────────── text ─────────────────────────────
   const TEXT = {
     runs: "Runs", tasks: "Tasks", compute: "Compute", noRuns: "No runs yet.",
-    startHint: "Start one:", noTasks: "No tasks yet.", live: "live", idle: "idle",
+    startHint: "Start one:", noTasks: "No tasks yet.",
     connecting: "connecting…", connected: "live", best: "Best error", anchor: "Anchor (round 0)",
     vsAnchor: "{0}× better than the anchor", betterBy: "×{0} better", evals: "Evaluations", errors: "{0} failed",
     gpuTime: "GPU time", cpuTime: "CPU time", cost: "Model cost", tokens: "{0} tokens", progress: "Convergence",
@@ -17,19 +17,19 @@
     legendEval: "evaluation", legendCur: "current round", legendBest: "best so far",
     legendErr: "failed", field: "Predicted field",
     noFrames: "The field appears here once an evaluation is scored.",
-    play: "Play", pause: "Pause", timeSlice: "t =", agent: "Agent activity",
+    play: "Play", pause: "Pause", agent: "Agent activity",
     noActivity: "No agent activity yet.", blocks: "Rounds", evalTable: "Evaluations",
     block: "Round", candidate: "Candidate", score: "Error", wall: "Wall s", when: "When",
-    status: "Status", spentOf: "{0} / {1} s", nEvals: "{0} evals", gpus: "GPUs", util: "Utilization",
+    status: "Status", spentOf: "{0} / {1} s", nEvals: "{0} evals", util: "Utilization",
     mem: "Memory", usedBy: "in use by {0}", free: "free", noGpu: "No GPU visible — CPU mode.",
-    model: "Model", task: "Task", title: "Title", state: "State", ready: "ready",
+    task: "Task", title: "Title", state: "State",
     authoring: "authoring: {0}", failedAt: "failed at {0}", stages: "Authoring",
     reference: "Reference", refBuilt: "built by an agent", refOperator: "from the operator",
     estimate: "Estimated error", order: "Observed order",
     reproduced: "Reproduced", yes: "yes", no: "no", tolerance: "tolerance",
     levelDiff: "level vs next level", finestEst: "estimate for the finest",
     authorAgent: "Author agent", problem: "problem.md", runIt: "Run it:",
-    notFound: "Not found.", workspace: "Workspace", back: "Overview", tFieldAt: "at",
+    notFound: "Not found.", back: "Overview",
     stage_intake: "Intake", stage_author: "Author the package", stage_reference: "Reference",
     stage_reference_check: "Check the reference", stage_validate: "Validate",
     stage_smoke: "Smoke test", stage_anchor: "Measure the anchor", stage_finalize: "Ready",
@@ -38,7 +38,7 @@
     st_created: "created", st_pending: "pending", st_skipped: "skipped", st_ready: "ready",
     st_measuring: "measuring", st_missing: "missing", st_unreadable: "unreadable",
     st_clean: "clean", st_violated: "violated", st_unchecked: "unchecked",
-    integrity: "integrity", blocksOf: "{0}/{1} rounds", table: "Table", snapshot: "snapshot",
+    blocksOf: "{0}/{1} rounds", snapshot: "snapshot",
     replay: "Discovery replay",
     del: "Delete", delRun: "Delete run {0}?", delTask: "Delete task {0}?",
     delRunBody: "This removes the run's folder (its rounds, candidates, evaluation records, summaries, " +
@@ -227,7 +227,7 @@
 
   const S = {
     route: [], overview: null, gpus: [], gpuHist: {}, frames: new Map(),
-    run: null, runSeen: {}, player: null, feed: null, selBlock: null, task: null, replay: null,
+    run: null, runSeen: {}, player: null, feed: null, selBlock: null, replay: null,
     ws: { name: "", path: "" },  // the workspace served, from /api/ping
   };
 
@@ -462,7 +462,7 @@
 
   // ───────────────────────────── GPUs ─────────────────────────────
   function updateGpus() {
-    const host = document.getElementById("ov-gpus") || document.getElementById("run-gpus");
+    const host = document.getElementById("ov-gpus");
     if (!host) return;
     if (!S.gpus.length) { host.replaceChildren(h("div", { class: "empty", text: T("noGpu") })); return; }
     const leases = (S.overview && S.overview.leases) || {};
@@ -558,7 +558,7 @@
       h("div", { class: "page-title" }, h("h1", { id: "run-title" }),
         h("span", { class: "meta", id: "run-meta" }), h("span", { id: "run-status" }), deleteButton("run", run.id)),
       h("div", { class: "tiles run-tiles", id: "run-tiles" }),
-      h("div", { class: "cockpit", id: "run-cockpit" },
+      h("div", { class: "cockpit" },
         h("div", { class: "col" },
           card("c-agent", "agent", T("agent"), "feed-aside", h("div", { id: "run-feed", class: "feed", "aria-live": "polite" }))),
         h("div", { class: "col" },
@@ -575,9 +575,9 @@
     );
   }
 
-  // The one-screen grids take the window's height below where they start.
+  // The one-screen grid takes the window's height below where it starts.
   function fitScreen() {
-    for (const el of app.querySelectorAll(".cockpit, .screen")) {
+    for (const el of app.querySelectorAll(".cockpit")) {
       if (getComputedStyle(el).display !== "grid") { el.style.height = ""; continue; }
       const top = el.getBoundingClientRect().top + window.scrollY;
       el.style.height = `${Math.max(460, window.innerHeight - top - 28)}px`;  // main's own foot
@@ -585,7 +585,7 @@
   }
   // inside a fitted grid a chart takes the height it is given
   const fitted = (el) => {
-    const grid = el.closest(".cockpit, .screen");
+    const grid = el.closest(".cockpit");
     return !!grid && getComputedStyle(grid).display === "grid";
   };
 
@@ -645,7 +645,6 @@
     if (!host.children.length) {
       host.append(tile("t-best", T("best")), tile("t-anchor", T("anchor")), tile("t-evals", T("evals")),
         tile("t-gpu", T("gpuTime")), tile("t-cpu", T("cpuTime")), tile("t-cost", T("cost")));
-      host.firstChild.classList.add("hero");
     }
     const q = (id, sel) => document.querySelector(`#${id} ${sel}`);
     tween(q("t-best", ".value"), run.best, fmtScore);
@@ -929,9 +928,9 @@
         oninput: () => { this.step = Number(this.stepSel.value); this.draw(); } });
       this.stepLabel = h("span", { class: "muted" });
       this.stepRow = h("div", { class: "controls step", hidden: true }, this.stepLabel, this.stepSel);
-      this.tools = document.getElementById("field-tools") || h("div", { class: "controls" });
+      this.tools = document.getElementById("field-tools");
       this.tools.replaceChildren(this.playBtn, this.slider);
-      host.replaceChildren(this.caption, this.box, ...(this.tools.isConnected ? [] : [this.tools]), this.stepRow);
+      host.replaceChildren(this.caption, this.box, this.stepRow);
     }
     stop() { clearInterval(this.timer); this.playing = false; }
     mode(next) {  // what the play button does next
@@ -1321,7 +1320,6 @@
   // ───────────────────────────── task view ─────────────────────────────
   async function viewTask(name, first) {
     const t = await get(`/api/tasks/${encodeURIComponent(name)}`);
-    S.task = t;
     document.title = `${t.name} — PINNForge`;
     if (first || !app.querySelector("#task-steps")) {
       app.replaceChildren(

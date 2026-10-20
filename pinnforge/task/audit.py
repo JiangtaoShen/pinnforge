@@ -50,7 +50,6 @@ import os
 import platform
 import re
 import shutil
-import time
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -1156,8 +1155,3 @@ def _opencode_ids(log: Path | None) -> set[str]:
         text = Path(log).read_text(encoding="utf-8", errors="replace")
         return set(re.findall(r"\b(ses_[A-Za-z0-9]{6,})\b", text))
     return set()
-
-
-def stamp() -> float:
-    """Now, as `sweep_sessions` compares it."""
-    return time.time()

@@ -61,10 +61,6 @@ def save(data: dict[str, Any]) -> Path:
     return p
 
 
-def names() -> list[str]:
-    return sorted(load()["bindings"])
-
-
 def _agent(d: dict[str, Any]) -> AgentConfig:
     cfg = AgentConfig.from_dict(d)
     cfg.runtime = runtime_registry.canonical(cfg.runtime)

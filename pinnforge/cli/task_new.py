@@ -55,7 +55,6 @@ design.
 AGENT_RECORD = "agent.json"  # the running agent's process group
 AUDIT_LOG = "author-audit.log"  # what an untrusted author reached for
 GUARD_LOG = "reference-guard.log"  # what a reference agent wrote where it may not
-ERRORS = authoring.ERROR_LOG
 
 # A column name that may reach the author and the public record: a short
 # identifier, no long runs of digits (a header is not a place for numbers).

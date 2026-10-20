@@ -84,7 +84,7 @@ ENDPOINTS = [
     "/api/ping", "/api/overview", "/api/gpus", "/api/runs/toy_1", "/api/runs/toy_1/summary/b01",
     "/api/runs/toy_1/summary/b02", "/api/runs/toy_1/activity", "/api/runs/toy_1/activity?block=b02",
     "/api/runs/toy_1/frame/0", "/api/tasks/toy", "/api/tasks/toy/activity",
-    "/", "/app.js", "/replay.js", "/fonts.css",
+    "/", "/app.js", "/fonts.css",
 ]
 
 

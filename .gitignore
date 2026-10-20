@@ -42,3 +42,6 @@ pinnforge/_QUARANTINE*/
 
 # Release archives built by scripts/build_examples.py
 /dist/
+
+# What tests/parity_ldc.py measured, written beside the checkout
+/parity_ldc.json

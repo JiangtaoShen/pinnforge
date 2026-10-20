@@ -6,8 +6,10 @@
  * papers it reached for, the notes it left, what it spent — then the closing
  * card. Seeking anywhere draws exactly what playing to that point would.
  *
- * The data is `/api/runs/<id>/story` (pinnforge/ui/story.py) and the archived
- * prediction frames, both read through the dashboard's own read-only API: no
+ * It plays in the file a run's film is rendered into (pinnforge/discovery.py),
+ * from data embedded there: the story (pinnforge/ui/story.py with the agent's
+ * script laid over it) under `/api/runs/<id>/story`, and the archived
+ * prediction frames, all read through the dashboard's read-only API: no
  * reference values, no error field. The field panel shows each champion's
  * prediction, and beside it how much that champion changed the prediction
  * it replaced.
@@ -20,18 +22,12 @@
   const W = 1920, H = 1080;
   const OPEN = 5, CLOSE = 5, LEAD = 3.25, TAIL = 0.35;
 
-  // ── motion: three helpers, nothing else eases ──
+  // ── motion: one easing, nothing else eases ──
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const ease = {
-    outCubic: (t) => 1 - Math.pow(1 - t, 3),
-    inOutQuad: (t) => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t),
-    outBack: (t) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); },
-  };
+  const outCubic = (t) => 1 - Math.pow(1 - t, 3);
   const span = (t, start, dur, fn) => (t <= start ? 0 : t >= start + dur ? 1 : fn((t - start) / dur));
   const MOTION = {
-    enter: (t, start, dur = 0.5) => span(t, start, dur, ease.outCubic),
-    draw: (t, start, dur = 1) => span(t, start, dur, ease.inOutQuad),
-    pop: (t, start, dur = 0.36) => span(t, start, dur, ease.outBack),
+    enter: (t, start, dur = 0.5) => span(t, start, dur, outCubic),
   };
 
   // ── small things ──
@@ -51,7 +47,6 @@
     if (text != null) e.textContent = text;
     return e;
   }
-  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
   // TeX → a few <i>/<sub>/<sup> tags around escaped text: variables italic,
   // digits, operators and function names upright. Every character of the
@@ -175,7 +170,7 @@
     const lerp = (a, z, t) => (a || 0) + ((z || 0) - (a || 0)) * t;
     const entry = b.entry != null ? b.entry : b.exit;
     return {
-      i, ph, phase, b, prev, local, started: local >= LEAD,
+      i, ph, phase, b, started: local >= LEAD,
       tokens: lerp(i === 0 ? 0 : prev.cost.tok_cum, b.cost.tok_cum, clamp(ph / 0.9, 0, 1)),
       gpu: lerp(i === 0 ? 0 : prev.cost.gpu_cum_h, b.cost.gpu_cum_h, clamp(ph / 0.9, 0, 1)),
       score: lerp(entry, b.exit, clamp((ph - 0.66) / 0.2, 0, 1)),
@@ -409,13 +404,13 @@
       const sec = d.train_s ? `${Math.round(d.train_s)} s` : "—";
       const gpu = el("img", "rp-gpu");
       gpu.alt = "";
-      gpu.src = (window.__PF_ASSETS__ && window.__PF_ASSETS__.gpu) || "gpu.svg";
+      gpu.src = window.__PF_ASSETS__.gpu;
       badge.append(gpu, el("span", "rp-badge-sep"), el("span", "rp-badge-text", d.cpu ? `CPU · ${sec}` : sec));
       mid.append(el("div", "rp-case-tag", String(d.run)), el("div", "rp-case-name", d.name || d.task), badge);
       const right = el("div", "rp-header-right");
       const logo = el("img", "rp-logo");
       logo.alt = "COLALab";
-      logo.src = (window.__PF_ASSETS__ && window.__PF_ASSETS__.colalab) || "colalab.png";
+      logo.src = window.__PF_ASSETS__.colalab;
       const logoBox = el("div", "rp-logo-box");
       logoBox.append(logo);
       const status = el("div", "rp-status");
@@ -733,7 +728,7 @@
       const logoBox = el("div", "rp-cover-logo");
       const logo = el("img");
       logo.alt = "COLALab — Computational Optimization for Learning & Adaptive Systems";
-      logo.src = (window.__PF_ASSETS__ && window.__PF_ASSETS__.colalab) || "colalab.png";
+      logo.src = window.__PF_ASSETS__.colalab;
       logoBox.append(logo);
       root.append(center, logoBox);
       return { root, hero, mark, title, sub, chipEls, result, logline, logoBox, heroSet: false };
@@ -942,6 +937,5 @@
       }
       return r;
     },
-    _texToHtml: texToHtml,  // for tests
   };
 })();

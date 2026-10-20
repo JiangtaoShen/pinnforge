@@ -354,7 +354,6 @@ class Metric:
 # else a task's metric computes stays inside (an MSE beside the rRMSE gives the
 # reference's norm away), and so do the metric's own words when it fails: it
 # ran against the answers. The details go to the task's private/logs.
-ANSWER_KEYS = ("rRMSE", "error")
 UNSCORABLE = "the predictions could not be scored"
 
 

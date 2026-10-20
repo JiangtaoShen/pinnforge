@@ -61,7 +61,6 @@ def _name(value: str, pattern=NAME) -> str:
 
 # Set by the server: the workspace every served file must resolve inside.
 ROOT_REAL: str | None = None
-FORBIDDEN = safe.FORBIDDEN
 
 
 def _allowed(path: Path) -> bool:

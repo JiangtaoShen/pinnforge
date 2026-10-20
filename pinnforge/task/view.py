@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import json
 import math
-import re
 from pathlib import Path
 
 VIEW_FILE = "view.json"
@@ -46,7 +45,6 @@ MAX_BYTES = 16_384
 MAX_PANELS = 4
 MAX_TITLE = 40
 COLORS = ("auto", "sequential", "diverging")
-_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,31}$")
 
 
 def load(path: Path) -> object | None:
