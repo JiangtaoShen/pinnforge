@@ -33,29 +33,34 @@ pinnforge task new                 # describe a PDE; without a reference, an age
 pinnforge run start -t <task> -n 5 # five rounds, detached, with a live dashboard
 ```
 
-`pinnforge doctor` checks the prerequisites, and `pinnforge ui` opens the
-dashboard.
+`pinnforge doctor` checks the prerequisites.
 
 ## Tasks
 
 A task package holds four parts:
-* the description (`problem.md`);
-* the standard PINN (`baseline.py`);
+* the description, `problem.md`, in seven fixed sections: Equation, Domain,
+  Boundary conditions, Initial condition, Scoring, Environment, Time budget;
+* the standard PINN, `baseline.py`: a frozen `PDE CONSTANTS` header with the
+  training time, `train(rng, eval_callback=None) -> (params, step_count)` and
+  `predict_fn(params, X) -> dict`;
 * the public files;
-* the evaluation tool (`eval.py`).
+* the evaluation tool, `eval.py`: grid handling and the metric,
+  `score_predictions(fields, ref_dir) -> {"rRMSE": x}`.
 
-Its reference solution stays in `private/`.
+Its `view.json` says what the dashboard's field panel draws, and its reference
+solution stays in `private/`.
 
 ```bash
 pinnforge task new burgers --describe "u_t + u u_x = 0.01/π u_xx on [-1,1]×[0,1], u(x,0) = -sin(πx), u(±1,t) = 0"
 pinnforge task new ldc2 --describe @spec.md --reference ~/data/ldc.mat
 pinnforge examples add ldc ks cyl naca           # the benchmark tasks, with their references
+pinnforge task delete ldc2
 ```
 
 An author agent writes the package without seeing the reference solution.
 A reference that an agent builds is computed at several resolutions and
 checked for convergence. Authors are audited, and `pinnforge task validate`
-checks every package for anything of the reference in it.
+checks that every package has this form and holds nothing of the reference.
 
 ## Runs
 
@@ -123,20 +128,6 @@ actually ran is recorded.
 * **Isolation.** To make it an OS fact, keep the references outside the
   workspace (`private_dir:`) and serve them as another user:
   `pinnforge scored <run> --private /srv/answers`.
-
-## The task contract
-
-* **`problem.md`**: seven fixed sections: Equation, Domain, Boundary
-  conditions, Initial condition, Scoring, Environment, Time budget.
-* **`baseline.py`**:
-  * a frozen `PDE CONSTANTS` header with the training time;
-  * `train(rng, eval_callback=None) -> (params, step_count)`;
-  * `predict_fn(params, X) -> dict`.
-* **`eval.py`**: grid handling and the metric,
-  `score_predictions(fields, ref_dir) -> {"rRMSE": x}`.
-* **`view.json`**: what the dashboard's field panel draws.
-
-`pinnforge task validate <name>` checks a package against the contract.
 
 ## Workspace layout
 
