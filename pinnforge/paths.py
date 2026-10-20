@@ -121,7 +121,12 @@ def local_path(location: str) -> str:
     from urllib.parse import urlparse
     from urllib.request import url2pathname
 
-    return url2pathname(urlparse(location).path)
+    url = urlparse(location)
+    if os.name != "nt" and url.netloc not in ("", "localhost"):
+        # Not a file URL proper but a path written after `file://` — `~/x`,
+        # `data/x` — which is how it was always read here: as that path.
+        return location[len("file://"):]
+    return url2pathname(url.path)
 
 
 def venv_bin(venv: Path, name: str = "python") -> Path:

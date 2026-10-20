@@ -418,6 +418,13 @@ def url_of(info: dict) -> str:
     return base + (f"?token={info['token']}" if info.get("token") else "")
 
 
+def _same_path(a, b) -> bool:
+    if not isinstance(a, str) or not a:
+        return False
+    norm = lambda p: os.path.normcase(os.path.realpath(p))  # noqa: E731
+    return norm(a) == norm(str(b))
+
+
 def running(root: Path) -> dict | None:
     """The dashboard serving this workspace, if one answers."""
     info = _read_record(state_file(root))
@@ -429,8 +436,12 @@ def running(root: Path) -> dict | None:
         host = "127.0.0.1" if info.get("host") in ("0.0.0.0", "::", "") else info["host"]
         q = f"?token={info['token']}" if info.get("token") else ""
         with urllib.request.urlopen(f"http://{host}:{info['port']}/api/ping{q}", timeout=2) as r:
-            if json.loads(r.read().decode()).get("app") == "pinnforge":
-                return info
+            ping = json.loads(r.read().decode())
+        # A live pid and a pinnforge on the port are not enough: after a crash
+        # the record goes stale, its pid can be reused, and the port can be
+        # another workspace's (or another user's) dashboard.
+        if ping.get("app") == "pinnforge" and _same_path(ping.get("path"), root):
+            return info
     except (OSError, ValueError):
         return None
     return None

@@ -122,12 +122,15 @@ def _drive(
     role: str = "author",
     timeout_s: float | None = None,
     record: Path | None = None,
+    on_start=None,
 ) -> AgentRun:
     """Run one agent session to its end, and make sure nothing of it is left running.
 
     `record`, if given, holds the agent's process group while it runs; it is
     removed once the group is confirmed gone, so a record that survives says
-    an agent may still be alive.
+    an agent may still be alive. `on_start(pgid)`, if given, is told the group
+    as soon as it exists — a run's lock records it there, so a driver that
+    dies outright leaves the next one a group it can stop.
     """
     runtime = runtime_registry.get_runtime(agent.runtime)
     started = time.time()
@@ -159,6 +162,8 @@ def _drive(
                     "label": label, "cwd": str(cwd), "driver": os.getpid(),
                     "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 }) + "\n", encoding="utf-8")
+            if on_start is not None:
+                on_start(pgid)
         rc = handle.wait(timeout=timeout_s)
         if rc is None and timeout_s is not None:
             # Past its time limit: stopped the way a Ctrl-C would stop it, so

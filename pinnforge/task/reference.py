@@ -38,7 +38,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-from pinnforge import paths
+from pinnforge import oscompat, paths
 
 DEFAULT_TOL = 1e-3
 VERDICT = "verdict.json"  # the full verdict, under private/reference/
@@ -231,7 +231,7 @@ def check(
         return fail()
 
     with tempfile.TemporaryDirectory(prefix="pinnforge-refcheck-",
-                                     ignore_cleanup_errors=True) as tmp:
+                                     ignore_cleanup_errors=oscompat.WINDOWS) as tmp:
         mod_dir = Path(tmp) / "task"
         mod_dir.mkdir()
         mod = load_metric(task_dir, mod_dir)
@@ -351,7 +351,7 @@ def _rerun(workdir: Path, python: Path, levels, timeout: float, reasons: list[st
         reasons.append("solve.py is missing — the levels cannot be reproduced")
         return False
     with tempfile.TemporaryDirectory(prefix="pinnforge-rerun-",
-                                     ignore_cleanup_errors=True) as tmp:
+                                     ignore_cleanup_errors=oscompat.WINDOWS) as tmp:
         for k, stored in levels:
             out = Path(tmp) / f"L{k}.npy"
             try:

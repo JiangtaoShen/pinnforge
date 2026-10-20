@@ -153,7 +153,8 @@ def package(root: Path, run: Path) -> Path:
 # ─────────────────────────────── the agent ───────────────────────────────
 
 
-def direct(root: Path, run: Path, agent: AgentConfig, timeout_s: float = TIMEOUT_S):
+def direct(root: Path, run: Path, agent: AgentConfig, timeout_s: float = TIMEOUT_S,
+           on_start=None):
     """The run's agent reads the package and writes its `script.json`."""
     from pinnforge import agents
 
@@ -164,7 +165,7 @@ def direct(root: Path, run: Path, agent: AgentConfig, timeout_s: float = TIMEOUT
     return agents._drive(
         prompt, cwd=pkg, agent=agent, log_path=pkg / "agent.log", label=f"film-{Path(run).name}",
         env={"PINNFORGE_ROOT": str(root), "PINNFORGE_RUN": str(run)}, role="film",
-        timeout_s=timeout_s)
+        timeout_s=timeout_s, on_start=on_start)
 
 
 # ─────────────────────────────── the film ───────────────────────────────
@@ -226,12 +227,15 @@ def render(root: Path, run: Path, script: dict | None = None) -> Film:
 
 
 def make(root: Path, run: Path, agent: AgentConfig | None = None,
-         timeout_s: float = TIMEOUT_S) -> Film:
-    """Package the run, have its agent write the script, render the film."""
+         timeout_s: float = TIMEOUT_S, on_start=None) -> Film:
+    """Package the run, have its agent write the script, render the film.
+
+    `on_start(pgid)` is told the agent's process group (see `agents._drive`).
+    """
     run = Path(run)
     agent = agent or RunConfig.load(paths.config_path(run)).agent
     package(root, run)
-    outcome = direct(root, run, agent, timeout_s)
+    outcome = direct(root, run, agent, timeout_s, on_start=on_start)
     film = render(root, run)
     if not outcome.ok:
         film.problems.insert(0, "the agent timed out" if outcome.timed_out

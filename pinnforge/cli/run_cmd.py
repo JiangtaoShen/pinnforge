@@ -325,7 +325,7 @@ def cmd_drive(args) -> int:
                 rc = _execute(args, run, cfg, lock, server=server, dispatch=dispatch)
         finally:
             lifecycle.release_claim(cfg.sandbox.gpus)  # the film needs no card
-        _film_after(root, run)
+        _film_after(root, run, lock)
         return rc
     except KeyboardInterrupt:
         print("\ninterrupted — state checkpointed; resume with:")
@@ -335,7 +335,12 @@ def cmd_drive(args) -> int:
         lock.release()
 
 
-def _film_after(root: Path, run: Path) -> None:
+def _recorded(lock):
+    """An `on_start` that records an agent's process group in the run's lock."""
+    return lambda pgid: lock.update(agent_pgid=pgid)
+
+
+def _film_after(root: Path, run: Path, lock) -> None:
     """A run that finished gets its discovery film, its own agent writing the script.
 
     Best effort, under the run's lock: the run is done whether or not its film
@@ -348,7 +353,7 @@ def _film_after(root: Path, run: Path) -> None:
 
     print(f"discovery film: {cfg.agent.runtime} is writing its script ...")
     try:
-        film = discovery.make(root, run, cfg.agent)
+        film = discovery.make(root, run, cfg.agent, on_start=_recorded(lock))
     except KeyboardInterrupt:
         print(f"discovery film interrupted; make it with: pinnforge run film {run.name}")
         return
@@ -357,6 +362,8 @@ def _film_after(root: Path, run: Path) -> None:
                                             exc_info=True)
         print(f"discovery film not made ({e}); try: pinnforge run film {run.name}")
         return
+    finally:
+        lock.update(agent_pgid=None)
     _film_said(film)
 
 
@@ -612,7 +619,8 @@ def cmd_stop(args) -> int:
     """
     run, _, _ = layout.load_run(args.run_id)
     outcome = lifecycle.stop(run, force=args.force)
-    if outcome.startswith(("still stopping", "refused")):
+    if outcome.startswith(("still stopping", "refused")) or lifecycle.holder(run) is not None:
+        # whatever was said, a held lock is a live driver: its state is its own
         print(f"{args.run_id}: {outcome}")
         return 1
     _, _, state = layout.load_run(args.run_id)
@@ -673,8 +681,21 @@ def cmd_film(args) -> int:
             return 1
         _film_said(discovery.render(root, run))
         return 0
-    print(f"discovery film: {cfg.agent.runtime} is writing its script ...")
-    _film_said(discovery.make(root, run, cfg.agent, timeout_s=args.timeout * 60))
+    # Under the run's lock, like a block: no driver at the same time, and the
+    # agent's group recorded where `run stop` and the next driver look for it.
+    try:
+        lock = lifecycle.RunLock(run).acquire()
+    except lifecycle.RunLocked as e:
+        print(f"error: {e} — its film is made when the run finishes")
+        return 2
+    lifecycle.install_signal_handlers(
+        escalate=lambda: lifecycle.kill_group(lock.info.get("agent_pgid")))
+    try:
+        print(f"discovery film: {cfg.agent.runtime} is writing its script ...")
+        _film_said(discovery.make(root, run, cfg.agent, timeout_s=args.timeout * 60,
+                                  on_start=_recorded(lock)))
+    finally:
+        lock.release()
     return 0
 
 

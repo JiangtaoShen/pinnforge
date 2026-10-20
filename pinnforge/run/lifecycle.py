@@ -397,8 +397,15 @@ def stop(run: Path, force: bool = False, wait_s: float = 90.0) -> str:
     if not _pid_alive(pid):
         return "not running"
     pid = int(pid)
-    if not oscompat.request_stop(pid) and not force:
-        return f"pid {pid} cannot be asked to stop — `run stop --force` to kill it"
+    if not oscompat.request_stop(pid):
+        # Not delivered: the driver runs as another user, or (Windows) is not
+        # listening. Only the lock says whether it is still there — never
+        # report a stop that did not happen.
+        if holder(run) is None:
+            return "stopped"
+        if not force:
+            return (f"refused: pid {pid} cannot be signalled from here (another user's "
+                    "process, or not listening) — `run stop --force` to kill it")
     deadline = time.time() + (10.0 if force else wait_s)
     while time.time() < deadline:
         if holder(run) is None:
@@ -411,7 +418,14 @@ def stop(run: Path, force: bool = False, wait_s: float = 90.0) -> str:
         kill_group(info.get("agent_pgid"))
     with contextlib.suppress(ProcessLookupError, PermissionError):
         oscompat.kill(pid)
-    return "killed"
+    # A kill this user may not deliver leaves the driver where it was.
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        if holder(run) is None:
+            return "killed"
+        time.sleep(0.25)
+    return (f"still stopping: pid {pid} could not be killed from here — it runs as another "
+            "user; stop it as that user")
 
 
 # ─────────────────────────────── detaching ───────────────────────────────

@@ -10,7 +10,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
-from pinnforge import gpus, paths, scoring
+from pinnforge import gpus, oscompat, paths, scoring
 from pinnforge.cli import task_new
 from pinnforge.run import anchor
 from pinnforge.task import authoring, contract, registry
@@ -139,7 +139,7 @@ def scratch_run(name: str):
     """
     task = registry.get_task(name)
     with tempfile.TemporaryDirectory(prefix=f"pinnforge-{name}-",
-                                     ignore_cleanup_errors=True) as tmp:
+                                     ignore_cleanup_errors=oscompat.WINDOWS) as tmp:
         run = Path(tmp) / f"{name}_0"
         run.mkdir()
         registry.install(task, run)

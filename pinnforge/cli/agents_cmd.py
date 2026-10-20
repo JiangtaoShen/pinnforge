@@ -50,7 +50,7 @@ def ping(agent: AgentConfig, timeout: float = 120.0) -> tuple[bool, str, str]:
         return False, str(e).strip('"'), ""
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="pinnforge-ping-",
-                                     ignore_cleanup_errors=True) as tmp:
+                                     ignore_cleanup_errors=oscompat.WINDOWS) as tmp:
         log = Path(tmp) / "ping.log"
         try:
             handle = runtime.start(

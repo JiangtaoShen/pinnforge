@@ -23,6 +23,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from pinnforge import oscompat
+
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 CATALOG = EXAMPLES_DIR / "catalog.json"
 DEMO = "demo"
@@ -114,7 +116,7 @@ def fetch(name: str, tasks_dir: Path, source: str | None = None, force: bool = F
         raise FileExistsError(f"{dest} already exists (pass --force to replace it)")
     url = source or e["url"]
     with tempfile.TemporaryDirectory(prefix=f"pinnforge-{name}-",
-                                     ignore_cleanup_errors=True) as tmp:
+                                     ignore_cleanup_errors=oscompat.WINDOWS) as tmp:
         archive = Path(tmp) / f"{name}.tar.gz"
         try:
             _download(url, archive)
