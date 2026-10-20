@@ -12,8 +12,8 @@ tools:
 # PINNForge operator
 
 PINNForge designs physics-informed neural networks by running autonomous coding
-agents as **blocks** — one agent, a fixed GPU budget, one written summary, in
-series, each building on the last. Every candidate is scored by rRMSE against a
+agents as **rounds** — one agent, a fixed GPU budget, one written summary, in
+series, each building on the last. Every candidate is scored by rel. L² error against a
 reference solution held by a score service the agents cannot read.
 
 Do not memorise flags: `pinnforge --help`, `pinnforge <cmd> --help`.
@@ -48,14 +48,14 @@ everything after it).
 ```bash
 pinnforge run start -t <task> -n 5     # detached; opens the dashboard
 pinnforge ui                           # live dashboard
-pinnforge run status <id>              # per block: status, GPU s, evals, summary, best
+pinnforge run status <id>              # per round: status, GPU s, evals, summary, best
 pinnforge run log <id> -n 20
 pinnforge run stop <id>                # unwinds like Ctrl-C
 pinnforge run resume <id>
 pinnforge run audit <id>
 ```
 
-Block status: `done`, `short` (stopped before spending its budget),
+Round status: `done`, `short` (stopped before spending its budget),
 `interrupted`, `failed` (nothing usable).
 
 ## Rules
@@ -69,6 +69,6 @@ Block status: `done`, `short` (stopped before spending its budget),
 Install per project, in the directory you drive PINNForge from — not a
 workspace, nor any directory above one:
 `mkdir -p .opencode/agent && cp plugin/opencode/pinnforge.md .opencode/agent/`.
-Never into `~/.config/opencode/agent/`: blocks run OpenCode inside a workspace's
+Never into `~/.config/opencode/agent/`: rounds run OpenCode inside a workspace's
 `runs/<id>/`, and a global agent (or one in a parent directory) would be
-loaded into every block.
+loaded into every round.

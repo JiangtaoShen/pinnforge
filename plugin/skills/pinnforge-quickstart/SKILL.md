@@ -1,14 +1,14 @@
 ---
 name: pinnforge-quickstart
-description: The fast path from zero to a running PINNForge experiment — what PINNForge is and when to reach for it, installing the CLI, creating a workspace, the zero-token demo, choosing the agent, creating a task from a described PDE, and launching and watching a run. Use whenever the user asks "what is pinnforge", "should I use pinnforge for this", wants to install or set it up, hits "command not found" for pinnforge, or says "use pinnforge to solve this PDE" and needs the end-to-end path. Hands off to `setting-up-harnesses` (the agent that runs blocks), `creating-a-pinnforge-task` (tasks and references) and `running-pinnforge-blocks` (operating a run).
+description: The fast path from zero to a running PINNForge experiment — what PINNForge is and when to reach for it, installing the CLI, creating a workspace, the zero-token demo, choosing the agent, creating a task from a described PDE, and launching and watching a run. Use whenever the user asks "what is pinnforge", "should I use pinnforge for this", wants to install or set it up, hits "command not found" for pinnforge, or says "use pinnforge to solve this PDE" and needs the end-to-end path. Hands off to `setting-up-harnesses` (the agent that runs the rounds), `creating-a-pinnforge-task` (tasks and references) and `running-pinnforge-blocks` (operating a run).
 ---
 
 # PINNForge quickstart
 
 **PINNForge** designs physics-informed neural networks by running autonomous
-coding agents against a fixed GPU budget. A **block** is one agent, one budget
-and one written summary; blocks run in series and later blocks build on
-earlier summaries. Every candidate is scored by relative L2 error (rRMSE)
+coding agents against a fixed GPU budget. A **round** is one agent, one budget
+and one written summary; rounds run in series and later rounds build on
+earlier summaries. Every candidate is scored by rel. L² error
 against a reference solution, by a score service the agents cannot read.
 
 ## When to reach for it
@@ -27,7 +27,7 @@ yet: PINNForge builds one with a classical solver and checks it converged.
 curl -fsSL https://raw.githubusercontent.com/JiangtaoShen/pinnforge/main/install.sh | sh
 pinnforge init ~/pf && cd ~/pf     # workspace, which GPUs to use, pinned JAX environment
 pinnforge demo                     # a full run in minutes, scripted agent, no API key
-pinnforge setup                    # choose and prove the coding agent that runs blocks
+pinnforge setup                    # choose and prove the coding agent that runs the rounds
 pinnforge doctor                   # every prerequisite, with the fix for anything missing
 ```
 
@@ -39,7 +39,7 @@ operator's call: ask the user rather than choosing, and pass it as
 `--gpus 1` / `--gpus 0,1` / `--gpus all` / `--gpus none` when running `init`
 for them. `pinnforge setup gpus` changes it later.
 
-`pinnforge demo` measures the anchor, runs two blocks and opens the dashboard,
+`pinnforge demo` measures the anchor, runs two rounds and opens the dashboard,
 so the operator sees the whole loop before spending anything.
 
 ## A task from a described PDE
@@ -71,6 +71,6 @@ pinnforge run status heat2d_1          # or attach / log / stop — see running-
 model for a year and another after; two runs a generation apart both record
 "opus" and quietly stop being comparable.
 
-**Never write into a live `runs/<id>/`.** It is a block's workspace, and the
+**Never write into a live `runs/<id>/`.** It is a round's workspace, and the
 orchestrator hashes everything outside that workspace around each dispatch; an
 edit shows up as an integrity violation and taints the run.

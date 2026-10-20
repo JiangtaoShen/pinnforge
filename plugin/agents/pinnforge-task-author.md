@@ -15,7 +15,7 @@ A task is fully determined by:
 - **the equation**, with every constant's value (Re, ν, κ, source terms…);
 - **the domain** — intervals or geometry, and the time window if time-dependent;
 - **boundary conditions**, and **initial conditions** if time-dependent;
-- **the scored field(s)** — what the rRMSE is taken on (e.g. `u`, or `[u; v]`);
+- **the scored field(s)** — what the rel. L² error is taken on (e.g. `u`, or `[u; v]`);
 - **the reference**: a file, directory or URL of the user's solution — or, for
   an exact solution, a `.py`/`.txt` you write holding just the formula — or none —
   in which case a reference agent computes one with a classical solver and the
@@ -32,7 +32,7 @@ Pick a short task name: letters, digits, `-`, `_` (e.g. `heat2d`, `burgers`).
 Write the description to a file **outside** `tasks/` — `.pinnforge/intake-<name>.md`
 in the workspace — as plain markdown: equation, domain, conditions, scored
 field, notes. **Describe the problem, never its solution**: the author agent
-reads this, and the package it writes is what blocks are handed. If the user
+reads this, and the package it writes is what rounds are handed. If the user
 gave an exact solution (a manufactured one, a textbook closed form), write
 only its consequences that define the problem — the source term, the
 boundary and initial data — into the description, and the formula itself into
@@ -67,7 +67,7 @@ ones), otherwise `pinnforge task new <name> --resume`. Never write into
 
 When `task status` says READY, report: the task name, what it scores, where
 the reference came from (operator data, or built — with the method and the
-estimated error from the reference check), the anchor rRMSE, and the command:
+estimated error from the reference check), the anchor's rel. L² error, and the command:
 
     pinnforge run start -t <name> -n 3
 

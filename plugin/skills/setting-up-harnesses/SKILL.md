@@ -1,12 +1,12 @@
 ---
 name: setting-up-harnesses
-description: Choose, install, authenticate and prove the coding-agent CLI that drives PINNForge blocks — claude_code, codex, cursor_agent or opencode — with `pinnforge setup` (named bindings pinned to exact model ids) and `pinnforge doctor --ping`. Use whenever a run dies on its first block, doctor reports a missing or failing agent, a model id is rejected, a provider needs configuring (OpenCode with DeepSeek or any OpenAI-compatible endpoint), or the user asks which agent or model to use.
+description: Choose, install, authenticate and prove the coding-agent CLI that drives PINNForge rounds — claude_code, codex, cursor_agent or opencode — with `pinnforge setup` (named bindings pinned to exact model ids) and `pinnforge doctor --ping`. Use whenever a run dies on its first round, doctor reports a missing or failing agent, a model id is rejected, a provider needs configuring (OpenCode with DeepSeek or any OpenAI-compatible endpoint), or the user asks which agent or model to use.
 ---
 
-# Setting up the agent that runs blocks
+# Setting up the agent that runs the rounds
 
 PINNForge does not talk to a model. It starts a coding-agent CLI headlessly,
-waits, and reads the filesystem. Every harness gets the **same block**:
+waits, and reads the filesystem. Every harness gets the **same round**:
 identical charter, prompt, working directory and environment.
 
 | runtime | CLI | default model |
@@ -19,7 +19,7 @@ identical charter, prompt, working directory and environment.
 ## `pinnforge setup`
 
 Once per machine. It finds the installed CLIs, asks for an exact model id for
-each one worth using, **pings it through the very adapter a block is started
+each one worth using, **pings it through the very adapter a round is started
 with**, and saves a named binding in `~/.config/pinnforge/agents.yaml`:
 
 ```bash
@@ -41,7 +41,7 @@ Runs use the default binding unless given `--agent <name>` (or `--runtime` and
 ## The ping is the point
 
 `--version` proves a binary exists. Credentials, the provider config and the
-model id all have to work too, and otherwise fail at the first block — an hour
+model id all have to work too, and otherwise fail at the first round — an hour
 in, with a measured anchor already paid for.
 
 ```bash
@@ -87,7 +87,7 @@ Set the runtime to `module.path:ClassName` — anything implementing the
 
 ## Never put instruction files above a workspace's runs
 
-Blocks run in `runs/<id>/`, and several CLIs read `CLAUDE.md`, `AGENTS.md` or
+Rounds run in `runs/<id>/`, and several CLIs read `CLAUDE.md`, `AGENTS.md` or
 `.cursor/rules/` from every ancestor directory. One at the workspace root (or
-above it) is read by every block and silently changes what a block is.
+above it) is read by every round and silently changes what a round is.
 `pinnforge doctor` warns about any it finds.

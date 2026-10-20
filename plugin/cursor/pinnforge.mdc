@@ -1,5 +1,5 @@
 ---
-description: PINNForge CLI workflow — creating tasks from described PDEs and running blocks from Cursor
+description: PINNForge CLI workflow — creating tasks from described PDEs and running rounds from Cursor
 globs:
 alwaysApply: false
 ---
@@ -7,14 +7,14 @@ alwaysApply: false
 # PINNForge
 
 > **Where this file may live.** Inside `plugin/`, or in the project you drive
-> PINNForge *from* — **never in a PINNForge workspace or above it.** Blocks run
+> PINNForge *from* — **never in a PINNForge workspace or above it.** Rounds run
 > in `runs/<id>/`, and several CLIs read `AGENTS.md` and `.cursor/rules/` from
-> every ancestor directory; a copy there is read by every block and changes
-> what a block is. `pinnforge doctor` warns about any it finds.
+> every ancestor directory; a copy there is read by every round and changes
+> what a round is. `pinnforge doctor` warns about any it finds.
 
 PINNForge designs physics-informed neural networks by running autonomous coding
-agents as **blocks** — one agent, a fixed GPU budget, one written summary, in
-series, each building on the last. Every candidate is scored by rRMSE against a
+agents as **rounds** — one agent, a fixed GPU budget, one written summary, in
+series, each building on the last. Every candidate is scored by rel. L² error against a
 reference solution held by a score service the agents cannot read.
 
 Do not memorise flags: `pinnforge --help`, `pinnforge <cmd> --help`.
@@ -49,14 +49,14 @@ everything after it).
 ```bash
 pinnforge run start -t <task> -n 5     # detached; opens the dashboard
 pinnforge ui                           # live dashboard
-pinnforge run status <id>              # per block: status, GPU s, evals, summary, best
+pinnforge run status <id>              # per round: status, GPU s, evals, summary, best
 pinnforge run log <id> -n 20
 pinnforge run stop <id>                # unwinds like Ctrl-C
 pinnforge run resume <id>
 pinnforge run audit <id>
 ```
 
-Block status: `done`, `short` (stopped before spending its budget),
+Round status: `done`, `short` (stopped before spending its budget),
 `interrupted`, `failed` (nothing usable).
 
 ## Rules

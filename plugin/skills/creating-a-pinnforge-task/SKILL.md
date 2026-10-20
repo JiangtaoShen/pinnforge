@@ -33,7 +33,7 @@ Useful flags: `--source <paper-or-notes>` (repeatable), `--agent <binding>`,
 | reference_check | the framework — not the agent — scores each level against the next with the task's own metric, measures the convergence order, estimates the finest level's error, and re-runs the two coarsest levels |
 | validate | the task contract |
 | smoke | the scoring path end to end on the CPU, free |
-| anchor | b00 — the baseline measured once; every block must beat it |
+| anchor | b00 — the baseline measured once; every round must beat it |
 | finalize | released to `run start` |
 
 With user data the reference stage runs *before* the author (the data fixes
@@ -61,7 +61,7 @@ be plain identifiers. `task new` honours `private_dir` / `FORGE_PRIVATE_DIR`.
 
 ## What a package contains
 
-- **`problem.md`** — the only prose a block reads; seven fixed sections.
+- **`problem.md`** — the only prose a round reads; seven fixed sections.
 - **`baseline.py`** — the root candidate: a frozen `PDE CONSTANTS` header and
   `train(rng, eval_callback=None) -> (params, step_count)` /
   `predict_fn(params, X) -> dict`.
@@ -92,7 +92,7 @@ wall clock.
 - `--measure` builds one when none is cached; `--rebuild` replaces it;
 - `--rekey` carries a stale anchor over **without a GPU** when only the
   evaluation's plumbing changed: allowed only if `baseline.py` is unchanged and
-  re-scoring the cached params reproduces the recorded rRMSE exactly.
+  re-scoring the cached params reproduces the recorded rel. L² error exactly.
 
 Before trusting a new task, compare b00 with a trivial predictor: on some
 problems the zero field nearly satisfies the residual and beating b00 proves
