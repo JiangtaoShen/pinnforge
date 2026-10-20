@@ -108,6 +108,7 @@ the predicted field of the incumbent.
 | `codex` | `codex` | `gpt-5.4` |
 | `cursor_agent` | `cursor-agent` | `auto` |
 | `opencode` | `opencode` | none; name one |
+| `pi` | `pi` | none; name one (`provider/id`) |
 
 `pinnforge setup` pins an exact model id and pings it. The model each round
 actually ran is recorded.

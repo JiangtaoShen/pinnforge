@@ -1,8 +1,9 @@
 """What an agent is doing right now, read out of its harness's own log.
 
 Each harness writes its transcript differently — Claude Code and Cursor emit
-stream-JSON, Codex emits JSON events, OpenCode writes logfmt — so each gets a
-small reader that turns lines into events of three kinds:
+stream-JSON, Codex and Pi emit JSON events of their own, OpenCode writes
+logfmt — so each gets a small reader that turns lines into events of three
+kinds:
 
     text   something the agent said
     tool   something it ran or touched (a command, a file it read or wrote)
@@ -108,6 +109,39 @@ def _codex(obj: dict) -> list[dict]:
     return []
 
 
+def _pi(obj: dict) -> list[dict]:
+    """Pi's `--mode json` events.
+
+    A reply is read once, from its `message_end` (`turn_end` and `agent_end`
+    repeat it, and the adapter keeps both out of the log); a tool call from
+    `tool_execution_start`, which carries its arguments; the end from
+    `agent_settled`, after which Pi does nothing more on its own.
+    """
+    kind = obj.get("type")
+    msg = obj.get("message") if isinstance(obj.get("message"), dict) else {}
+    if kind == "session":
+        return [{"kind": "info", "text": "session started"}]
+    if kind == "tool_execution_start":
+        return [{"kind": "tool", "text": _tool_text(str(obj.get("toolName", "tool")),
+                                                    obj.get("args", {}))}]
+    if kind == "message_end" and msg.get("role") == "assistant":
+        out = [{"kind": "text", "text": part["text"]} for part in msg.get("content") or []
+               if isinstance(part, dict) and part.get("type") == "text"
+               and isinstance(part.get("text"), str) and part["text"].strip()]
+        if msg.get("stopReason") in ("error", "aborted"):
+            why = msg.get("errorMessage") or msg["stopReason"]
+            out.append({"kind": "info", "text": f"reply failed · {why}"})
+        return out
+    if kind == "auto_retry_start":
+        return [{"kind": "info", "text": f"retrying · {obj.get('errorMessage', '')}"}]
+    if kind == "compaction_start":
+        return [{"kind": "info", "text": "compacting the context"}]
+    if kind == "agent_settled":
+        return [{"kind": "info",
+                 "text": "session aborted" if obj.get("aborted") else "session finished"}]
+    return []
+
+
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _RESET = "\x1b[0m"
 
@@ -146,7 +180,7 @@ def _opencode(lines: list[str]) -> list[dict]:
 
 def parse(runtime: str, lines: list[str], base: str | None = None) -> list[dict]:
     reader = {"claude_code": _claude, "cursor_agent": _claude, "replay": _claude,
-              "codex": _codex}.get(runtime)
+              "codex": _codex, "pi": _pi}.get(runtime)
     events: list[dict] = []
     if reader is None:
         events = _opencode(lines)

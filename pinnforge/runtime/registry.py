@@ -15,6 +15,7 @@ from pinnforge.runtime.builtin.claude_code import ClaudeCodeRuntime
 from pinnforge.runtime.builtin.codex import CodexRuntime
 from pinnforge.runtime.builtin.cursor_agent import CursorAgentRuntime
 from pinnforge.runtime.builtin.opencode import OpenCodeRuntime
+from pinnforge.runtime.builtin.pi import PiRuntime
 from pinnforge.runtime.builtin.replay import ReplayRuntime
 
 _RUNTIMES: dict[str, type] = {
@@ -22,6 +23,7 @@ _RUNTIMES: dict[str, type] = {
     "codex": CodexRuntime,
     "cursor_agent": CursorAgentRuntime,
     "opencode": OpenCodeRuntime,
+    "pi": PiRuntime,
     "replay": ReplayRuntime,
 }
 
@@ -37,6 +39,8 @@ _ALIASES: dict[str, str] = {
     "cursor": "cursor_agent",
     "cursor-agent": "cursor_agent",
     "open-code": "opencode",
+    "pi-agent": "pi",
+    "pi-coding-agent": "pi",
 }
 
 

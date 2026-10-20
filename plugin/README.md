@@ -33,7 +33,7 @@ that session (`claude --plugin-dir`), from the copy inside the installed package
 /plugin install pinnforge@pinnforge-marketplace
 ```
 
-**Codex, Cursor and OpenCode — per project, never globally.** Install into the
+**Codex, Cursor, OpenCode and Pi — per project.** Install into the
 project directory you drive PINNForge *from*: your own project, which is
 neither a PINNForge workspace nor a directory above one. From a checkout
 (`plugin/`; `pinnforge chat` prints the installed package's own copy):
@@ -45,6 +45,8 @@ cp plugin/AGENTS.md . && mkdir -p .agents/skills && cp -r plugin/skills/. .agent
 mkdir -p .cursor/rules && cp plugin/cursor/pinnforge.mdc .cursor/rules/
 # OpenCode: the subagent
 mkdir -p .opencode/agent && cp plugin/opencode/pinnforge.md .opencode/agent/
+# Pi: the instructions and the skills, as for Codex (Pi asks once to trust the project)
+cp plugin/AGENTS.md . && mkdir -p .agents/skills && cp -r plugin/skills/. .agents/skills/
 ```
 
 Why not globally (`codex plugin add`, `~/.config/opencode/agent/`, Cursor user
@@ -55,6 +57,9 @@ configuration from parent directories — so the operator's instructions would
 reach every round, and a round on one harness would stop being the same round
 as on another. Only Claude Code rounds are started with the plugin switched
 off (`--settings`), which is why the Claude Code install above may be global.
+Pi rounds are started with skills and instruction files off (`--no-skills
+--no-context-files`), so for Pi `~/.pi/agent/AGENTS.md` and
+`~/.pi/agent/skills/` are safe too.
 
 ## The one placement rule
 

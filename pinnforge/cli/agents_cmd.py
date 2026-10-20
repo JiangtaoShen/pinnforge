@@ -79,9 +79,31 @@ def ping(agent: AgentConfig, timeout: float = 120.0) -> tuple[bool, str, str]:
                 resolved = extract(log).model
             except (OSError, ValueError):
                 resolved = ""
+        # A harness that can say why from its log (Pi: the failed reply's
+        # error) is asked, rather than shown its last line — an event like
+        # any other.
+        why = ""
+        explain = getattr(runtime, "extract_error", None)
+        if rc != 0 and explain is not None:
+            try:
+                why = explain(log)
+            except (OSError, ValueError):
+                why = ""
+        # A harness that resolves the id it is given loosely (Pi) can say
+        # whether the session ran what was pinned, or something it matched.
+        problem = ""
+        judge = getattr(runtime, "pin_problem", None)
+        if rc == 0 and judge is not None:
+            try:
+                problem = judge(model, log)
+            except (OSError, ValueError):
+                problem = ""
+    if problem:
+        return False, problem, resolved
     if rc != 0:
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        return False, f"exit {rc} in {took:.1f}s: {(lines[-1] if lines else '')[:140]}", ""
+        why = why or (lines[-1] if lines else "")
+        return False, f"exit {rc} in {took:.1f}s: {why[:140]}", ""
     if not text.strip():
         return False, f"exit 0 in {took:.1f}s but said nothing", ""
     ran = f", ran {resolved}" if resolved and resolved != model else ""

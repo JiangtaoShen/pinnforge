@@ -122,11 +122,13 @@ def test_block_prompt_is_runtime_independent():
     assert "foreground" in prompt
     # The prompt takes no runtime argument, so the way this could regress is a
     # harness name leaking into the text — a tool name, a CLI flag, a vendor.
+    # As a word: `pi` is a harness, and also the first letters of "pinnforge".
     lowered = prompt.lower()
     for name in runtime_registry.known_runtimes():
         rt = runtime_registry.get_runtime(name)
-        assert name not in lowered, name
-        assert rt.default_command not in lowered, rt.default_command
+        for word in (name, rt.default_command):
+            assert not re.search(rf"(?<![a-z0-9_-]){re.escape(word)}(?![a-z0-9_-])",
+                                 lowered), word
 
 
 def test_crashed_prompt_adds_recovery_instructions():

@@ -275,6 +275,16 @@ def clean_env(extra: dict[str, str] | None = None) -> dict[str, str]:
         "CLAUDE_SESSION_ID",
         "ANTHROPIC_MODEL",
         "CODEX_SESSION_ID",
+        # Pi's markers, and the session it hands every command it runs —
+        # `PI_SESSION_FILE` is the operator's own transcript when PINNForge
+        # is driven from inside Pi.
+        "PI_CODING_AGENT",
+        "AI_AGENT",
+        "PI_SESSION_ID",
+        "PI_SESSION_FILE",
+        "PI_PROVIDER",
+        "PI_MODEL",
+        "PI_REASONING_LEVEL",
         "VIRTUAL_ENV",
         "PYTHONHOME",
     ):
@@ -292,10 +302,14 @@ def spawn(
     log_path: Path,
     block_id: str,
     command_prefix: list[str] | None = None,
+    stdin: Any = None,
+    handle: type[AgentHandle] | None = None,
 ) -> AgentHandle:
     """Start the CLI in its own process group with stdout teed to `log_path`.
 
-    On Windows the group dies with this process (see `oscompat`).
+    On Windows the group dies with this process (see `oscompat`). `stdin`
+    defaults to this process's; `handle` is the AgentHandle subclass to
+    return, for a harness that has to be stopped or judged its own way.
     """
     if command_prefix:
         cmd = [*command_prefix, *cmd]
@@ -307,13 +321,14 @@ def spawn(
         cmd,
         cwd=str(cwd),
         env=env,
+        stdin=stdin,
         stdout=log_file,
         stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
         errors="replace",
     )
-    return AgentHandle(
+    return (handle or AgentHandle)(
         block_id=block_id,
         process=proc,
         cwd=cwd,

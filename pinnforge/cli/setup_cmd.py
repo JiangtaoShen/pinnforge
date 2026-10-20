@@ -26,6 +26,7 @@ SUGGESTED = {
     "codex": [],
     "cursor_agent": [],
     "opencode": ["deepseek/deepseek-chat", "anthropic/claude-opus-5-5"],
+    "pi": ["anthropic/claude-opus-5-5", "openai/gpt-5.5", "deepseek/deepseek-v4-pro"],
 }
 
 
@@ -136,7 +137,7 @@ def cmd_setup(args) -> int:
     installed = [r["runtime"] for r in rows if r["path"]]
     if not installed:
         print("No coding-agent CLI found. Install one of: Claude Code (`claude`), Codex,")
-        print("Cursor Agent or OpenCode, sign in, then run `pinnforge setup` again.")
+        print("Cursor Agent, OpenCode or Pi, sign in, then run `pinnforge setup` again.")
         return 1
     made: list[str] = []
     for runtime in installed:

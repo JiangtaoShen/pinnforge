@@ -113,7 +113,7 @@ def test_completion_offers_no_internal_commands():
 # ─────────────────────────────── chat on another harness ───────────────────────────────
 
 
-@pytest.mark.parametrize("runtime", ["opencode", "codex", "cursor_agent"])
+@pytest.mark.parametrize("runtime", ["opencode", "codex", "cursor_agent", "pi"])
 def test_chat_installs_the_operator_plugin_per_project_only(ws, capsys, runtime):
     bindings.put("other", AgentConfig(runtime=runtime, model="m"))
     assert chat_cmd.cmd_chat(argparse.Namespace(agent="other", rest=[])) == 2

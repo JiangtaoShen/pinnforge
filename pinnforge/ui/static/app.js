@@ -593,6 +593,7 @@
   const RUNTIMES = {
     replay: ["Scripted demo agent", "replays a fixed playbook; calls no model"],
     claude_code: ["Claude Code"], codex: ["Codex"], cursor_agent: ["Cursor Agent"], opencode: ["OpenCode"],
+    pi: ["Pi"],
   };
   // hovering an element shows its rows ([label, text, isPath]) in the tooltip
   function hoverTip(el, rows) {

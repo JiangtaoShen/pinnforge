@@ -45,10 +45,12 @@ from __future__ import annotations
 
 import contextlib
 import fnmatch
+import glob
 import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import urllib.parse
 from dataclasses import dataclass, field
@@ -93,6 +95,7 @@ class Call:
     result: str = ""  # what came back
     raw: str = ""  # the call as the transcript has it, for the private log
     inert: bool = False  # touches no files (a web search): only its URL can matter
+    pattern: str = ""  # what a search tool looks for (text, not a path)
 
     def describe(self) -> str:
         if self.shell:
@@ -162,6 +165,8 @@ def from_args(tool: str, args) -> Call:
             call.shell += " " + (value if isinstance(value, str) else " ".join(_strs(value)))
         elif key in _PATH_KEYS:
             call.paths += _strs(value)
+        elif key == "pattern" and call.search:
+            call.pattern += " " + " ".join(_strs(value))
         elif key in _GLOB_KEYS or (key == "pattern" and low in _GLOB_TOOLS):
             call.globs += [(base, g) for g in _strs(value)]
     return call
@@ -288,6 +293,51 @@ def _codex(lines: list[str]) -> list[Call]:
     return calls
 
 
+def _pi(lines: list[str]) -> list[Call]:
+    """Pi's `--mode json` events.
+
+    A call is read from the reply that made it (`message_end`, a `toolCall`
+    part) — an attempt Pi refused to run is still an attempt — and from
+    `tool_execution_start` for one no reply showed; its output from the
+    `toolResult` message the model was given. `turn_end`, `agent_end` and
+    `tool_execution_end` repeat what is read already, and are skipped.
+    """
+    calls: list[Call] = []
+    by_id: dict[str, Call] = {}
+
+    def add(cid: str, name, args) -> None:
+        if cid and cid in by_id:
+            return
+        call = from_args(str(name or "tool"), args if isinstance(args, dict) else {})
+        calls.append(call)
+        if cid:
+            by_id[cid] = call
+
+    for line in lines:
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        kind = obj.get("type")
+        msg = obj.get("message") if isinstance(obj.get("message"), dict) else {}
+        if kind == "message_end" and msg.get("role") == "assistant":
+            for part in msg.get("content") or []:
+                if isinstance(part, dict) and part.get("type") == "toolCall":
+                    add(str(part.get("id") or ""), part.get("name"), part.get("arguments"))
+        elif kind == "message_end" and msg.get("role") == "toolResult":
+            call = by_id.get(str(msg.get("toolCallId") or ""))
+            if call is not None:
+                call.result += "\n" + _flat(msg.get("content"))
+        elif kind == "tool_execution_start":
+            add(str(obj.get("toolCallId") or ""), obj.get("toolName"), obj.get("args"))
+    return calls
+
+
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _RESET = "\x1b[0m"
 _OC_MARK = re.compile(r"^(→|←|✱|✗|\$|%|⚙|◇|◈|•|⇆|\|)\s+(.*)$")
@@ -328,7 +378,8 @@ def _opencode(lines: list[str]) -> list[Call]:
         if s:
             tool, pattern, where = s.group(1), s.group(2), (s.group(3) or "").strip()
             if tool == "Grep":
-                calls.append(Call(tool=tool, paths=[where or "."], search=True, raw=text))
+                calls.append(Call(tool=tool, paths=[where or "."], search=True, raw=text,
+                                  pattern=pattern))
             else:
                 calls.append(Call(tool=tool, globs=[(where, pattern)], raw=text))
             continue
@@ -355,6 +406,8 @@ def tool_calls(runtime: str, lines: list[str]) -> list[Call]:
         return _codex(lines)
     if runtime == "opencode":
         return _opencode(lines)
+    if runtime == "pi":
+        return _pi(lines)
     return _claude(lines)  # claude_code, replay
 
 
@@ -481,6 +534,10 @@ def harness_stores(home: Path | None = None) -> dict[str, Path]:
     claude = Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude")
     codex = Path(os.environ.get("CODEX_HOME") or home / ".codex")
     data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share")
+    pi = Path(os.environ.get("PI_CODING_AGENT_DIR") or home / ".pi" / "agent").expanduser()
+    extra = {}
+    if os.environ.get("PI_CODING_AGENT_SESSION_DIR"):
+        extra["pi_session_dir"] = Path(os.environ["PI_CODING_AGENT_SESSION_DIR"]).expanduser()
     return {
         "claude_projects": claude / "projects",
         "claude_file_history": claude / "file-history",
@@ -490,6 +547,8 @@ def harness_stores(home: Path | None = None) -> dict[str, Path]:
         "codex_archived": codex / "archived_sessions",
         "opencode": data / "opencode",
         "cursor_chats": home / ".cursor" / "chats",
+        "pi_sessions": pi / "sessions",
+        **extra,
     }
 
 
@@ -650,6 +709,9 @@ _ARCHIVERS = re.compile(r"\b(?:tar|zip|cpio)\b|(?i:\bcompress-archive\b)")
 _SEGMENTS = re.compile(r"&&|\|\||[;|&\n]")
 _ANSWER_NAME = re.compile(r"ref_values", re.IGNORECASE)
 _LOOKUP = re.compile(r"\b(?:find|locate|plocate|mlocate|fd)\b")
+_LOCATE = re.compile(r"\b(?:locate|plocate|mlocate)\b")
+# The framework's own source: documentation to an author, and no task's answers.
+_FRAMEWORK = os.path.realpath(Path(__file__).resolve().parents[1])
 _ANSWER_FILE = re.compile(r"ref_values(?:\.\w+|\*|\?)|[/\\]ref_values", re.IGNORECASE)
 _NAME_FLAGS = ("-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-g", "--glob",
                "--include", "-glob")
@@ -722,7 +784,9 @@ def _tokens(text: str, home: Path) -> list[str]:
     text = _HOME_VAR.sub(_HOME_MARK, text)
     for t in _split(text):
         t = t.strip("[]")
-        if t not in (".", "..") and not t.endswith(("/.", "\\.") if _WINDOWS else "/."):
+        # a sentence's full stop goes; a directory's `.` and `..` stay
+        if t not in (".", "..") and not t.endswith(
+                ("/.", "/..", "\\.", "\\..") if _WINDOWS else ("/.", "/..")):
             t = t.rstrip(".")
         if not t or (t.startswith("-") and not t.startswith("-/")):
             continue
@@ -730,13 +794,138 @@ def _tokens(text: str, home: Path) -> list[str]:
     return out
 
 
+# Commands whose first operand is a pattern — a regular expression to match,
+# not a path — unless one is given with `-e` (`-f` names a file of them: a
+# path). The letters are the short options that take a value, so a value is
+# not mistaken for the pattern; `-E` is a flag to grep and takes an encoding
+# in rg. Not sed or awk: their "pattern" is a program, which reads files
+# (`sed '1r FILE'`, awk's `getline < FILE`) and runs commands.
+_PATTERN_FIRST = {
+    "grep": "efmABCdD", "egrep": "efmABCdD", "fgrep": "efmABCdD",
+    "rg": "efgtTmABCMjEr", "ag": "ABCGgm", "ack": "ABCm",
+}
+# Modes of those in which no operand is a pattern: they list files.
+_NO_PATTERN = {"rg": {"--files", "--type-list"}, "ag": {"-g", "--list-file-types"},
+               "ack": {"-f", "-g", "--files", "--help-types"}}
+_OPERATOR = re.compile(r"[;&|()<>]+")
+_NEGATIONS = ("-not", "!", "\\!")
+_FIND_TESTS = ("-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex",
+               "-iregex")
+_FIND_OR = re.compile(r"(?<!\S)(?:-o|-or|,)(?!\S)")
+
+
+def _droppable(word: str) -> bool:
+    """A pattern word that can be no more than text: no expansion in it, no path."""
+    return not re.search(r"[$`/]", word)
+
+
+def _pattern_words(shell: str) -> tuple[list[str], list[str]]:
+    """The words of `shell` that are patterns of what a search keeps or leaves out, and the rest.
+
+    `ls ../demo | grep -v private` names no path `private`; it keeps such paths
+    out, as `find -not -path '*/private/*'` does. These words are judged as
+    text, not as paths — and only these: every file a search reads is still
+    a path, what it printed is still read, and a word holding an expansion
+    (`$(…)`, a backtick) or a separator is never one of them. A command that
+    cannot be parsed yields none (POSIX shells only: a Windows one, whose
+    `\\` shlex would eat, yields none either). The rest are every other word,
+    as the shell reads them, so a word is judged where it stands whatever a
+    pattern happens to spell.
+    """
+    if _WINDOWS:
+        return [], []
+    try:
+        lex = shlex.shlex(shell.replace("\n", " ; "), posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        lex.commenters = ""  # a `#` is a character to the audit: `$#`, `a#b`, a URL's
+        words = list(lex)
+    except ValueError:
+        return [], []
+    picked: list[int] = []  # where the patterns stand in `words`
+    i, start = 0, True
+    while i < len(words):
+        w = words[i]
+        i += 1
+        if _OPERATOR.fullmatch(w):
+            start = True
+            continue
+        if not start or w in ("sudo", "env", "command") or re.fullmatch(r"\w+=.*", w):
+            continue
+        start = False
+        name = os.path.basename(w)
+        end = i
+        while end < len(words) and not _OPERATOR.fullmatch(words[end]):
+            end += 1
+        args = words[i:end]
+        base_i = i
+        i = end
+        if name == "find":
+            # `-o` can turn a negation into the set it seemed to leave out
+            if not any(_FIND_OR.fullmatch(a) for a in args):
+                picked += [base_i + k + 2 for k in range(len(args) - 2)
+                           if args[k] in _NEGATIONS and args[k + 1] in _FIND_TESTS
+                           and _droppable(args[k + 2])]
+            continue
+        takes = _PATTERN_FIRST.get(name)
+        if takes is None or _NO_PATTERN.get(name, set()) & set(args):
+            continue
+        given = False  # by -e / --regexp, or -f / --file
+        k = 0
+        while k < len(args):
+            a = args[k]
+            if a == "--":
+                if not given and k + 1 < len(args) and _droppable(args[k + 1]):
+                    picked.append(base_i + k + 1)
+                break
+            if a.startswith("--"):
+                opt, eq, _ = a.partition("=")
+                if opt in ("--regexp", "--file"):
+                    given = True
+                    if not eq and k + 1 < len(args):
+                        k += 1
+                        if opt == "--regexp" and _droppable(args[k]):
+                            picked.append(base_i + k)
+            elif a.startswith("-") and len(a) > 1:
+                for j, ch in enumerate(a[1:], 1):
+                    if ch not in takes:
+                        continue
+                    given = given or ch in "ef"
+                    if j == len(a) - 1 and k + 1 < len(args):  # its value is the next word
+                        k += 1
+                        if ch == "e" and _droppable(args[k]):
+                            picked.append(base_i + k)
+                    break
+            elif not given:
+                if _droppable(a):
+                    picked.append(base_i + k)  # the first operand: the pattern
+                break
+            k += 1
+    chosen = set(picked)
+    out = [words[n] for n in sorted(chosen)]
+    rest = [w for n, w in enumerate(words) if n not in chosen and not _OPERATOR.fullmatch(w)]
+    return out, rest
+
+
 def _name_patterns(text: str, home: Path) -> list[str]:
-    """What a recursive search looks for by name: globs, `-name X`, and `.endswith('.npy')`."""
+    """What a recursive search looks for by name: globs, `-name X`, and `.endswith('.npy')`.
+
+    Not what it leaves out: `find -not -path '*/private/*'` (or `! -name`) and
+    ripgrep's `-g '!…'` keep the answers out of a listing, which is the
+    opposite of looking for them.
+    """
     raw = [t for t in _split(text) if t]
     pats = []
+    skip = -1
+    honest = not _FIND_OR.search(text)  # `-o` can turn a negation into its opposite
     for i, t in enumerate(raw):
+        if i == skip:
+            continue
         if (t in _NAME_FLAGS or t.lower() in _PS_NAME_FLAGS) and i + 1 < len(raw):
-            pats.append(raw[i + 1])
+            skip = i + 1
+            left_out = honest and ((i > 0 and raw[i - 1] in _NEGATIONS)
+                                   or raw[i + 1].startswith("!"))
+            if not left_out:
+                pats.append(raw[i + 1])
         elif _GLOB_CHARS.search(t) and not _has_sep(t):
             pats.append(t)
         elif re.fullmatch(r"\.(?:npy|npz|mat|h5|hdf5|csv|json|txt)", t):
@@ -770,23 +959,40 @@ class _Reader:
         shell_tokens = _tokens(shell, scope.home) if shell else []
         recursive = bool(_RECURSIVE.search(shell)) if shell else False
 
+        # The answers' file name is a search target only where something
+        # searches for it: `find -name`, `locate`, a recursive glob or grep,
+        # or a read of a path by that name. Anywhere else it reaches nothing
+        # a path of its own would not (an author saving a stand-in reference
+        # in a temp directory to try its metric is not looking). Read off every
+        # word, a search's pattern included: `grep -rn ref_values ..` looks.
+        looked_up = False
         for t in tokens + shell_tokens:
-            explicit = t in tokens
+            if _ANSWER_NAME.search(t) and (recursive or _LOOKUP.search(shell)
+                                           or _GLOB_CHARS.search(t)):
+                looked_up = True
+            if t in tokens and not call.write and _ANSWER_FILE.search(t):
+                flag(HUNT)
+        if call.search and _ANSWER_NAME.search(call.pattern):
+            looked_up = True  # a search tool's own pattern
+        # Where the words lead: a search's pattern is text, not a path. What
+        # is left out is a word of the command as written that spells only a
+        # pattern; every other word is judged where it stands, as the shell
+        # reads it, so no pattern can take a path's place.
+        patterns, rest = _pattern_words(shell) if shell else ([], [])
+        path_tokens = list(tokens)
+        if patterns:
+            spelt = {t for w in patterns for t in _tokens(w, scope.home)}
+            path_tokens += [t for t in shell_tokens if t not in spelt]
+            path_tokens += [t for w in rest for t in _tokens(w, scope.home)]
+        else:
+            path_tokens += shell_tokens
+        if looked_up and not self._framework_only(base, path_tokens, shell):
+            flag(HUNT)
+        for t in path_tokens:
             if _GLOB_CHARS.search(t):
                 flag(self._glob(base, t, dirs=False))
-                if _ANSWER_NAME.search(t):
-                    flag(HUNT)
-                continue
-            # The answers' file name is a search target only where something
-            # searches for it: `find -name`, `locate`, a recursive glob or grep,
-            # or a read of a path by that name. Anywhere else it reaches nothing
-            # a path of its own would not (an author saving a stand-in
-            # reference in a temp directory to try its metric is not looking).
-            looked_up = (recursive or _LOOKUP.search(shell)) and _ANSWER_NAME.search(t)
-            read_by_name = explicit and not call.write and _ANSWER_FILE.search(t)
-            if looked_up or read_by_name:
-                flag(HUNT)
-            flag(self._path(base, t))
+            else:
+                flag(self._path(base, t))
 
         for segment in _SEGMENTS.split(shell) if shell else []:
             flag(self._copied(base, segment))
@@ -813,6 +1019,32 @@ class _Reader:
             seen.add(cat)
             out.append(Hit(cat, (call.describe()[:400] + (f"  ⇒ {why[:300]}" if why else ""))))
         return out
+
+    def _framework_only(self, base: Path, tokens: list[str], shell: str) -> bool:
+        """Does a search read only files of PINNForge's own code, where no answers are?
+
+        An author learning how `eval.py` names its reference greps the
+        framework's source for `ref_values`: reading documentation. Only when
+        every operand is a regular file (a glob of them included) inside the
+        package: a directory is a tree, which can hold a link out of it; a
+        link is a way out; an expansion (`$`, a backtick) is a root this
+        cannot see; and a search with no operand searches where it runs.
+        """
+        if _LOCATE.search(shell) or re.search(r"[$`]", shell):
+            return False
+        files: list[str] = []
+        for t in tokens:
+            if _GLOB_CHARS.search(t):
+                found = glob.glob(str(_abs(base / t)))
+                if not found:
+                    return False
+                files += found
+            elif t in (".", "..", "/", "~") or _has_sep(t) or t.startswith(str(self.scope.home)):
+                files.append(str(_abs(base / t)))
+        files = [f for f in files if not _under(f, "/dev")]  # a redirect's /dev/null
+        return bool(files) and all(
+            not os.path.islink(f) and os.path.isfile(f)
+            and _under(os.path.realpath(f), _FRAMEWORK) for f in files)
 
     # ── one token ──
 
@@ -1057,6 +1289,10 @@ def sweep_sessions(runtime: str, workdir: Path, since: float, dest: Path, *,
       `-`), plus the file backups and environment it keeps per session;
     * Codex: `~/.codex/sessions/**/rollout-*.jsonl` written since `since`
       that name `workdir`;
+    * Pi: the adapter starts every agent but a block with `--no-session`, so
+      it keeps nothing but the log; a session Pi wrote to its own store
+      anyway — `~/.pi/agent/sessions`, or `PI_CODING_AGENT_SESSION_DIR` —
+      since `since`, whose header names `workdir`, is moved;
     * OpenCode and Cursor Agent keep sessions in databases that moving files
       out of would corrupt; they are left, with a warning saying where.
 
@@ -1134,6 +1370,20 @@ def sweep_sessions(runtime: str, workdir: Path, since: float, dest: Path, *,
                 if recent and _names_dir(f, needles):
                     move(f, f"codex/{key}")
         return moved, left(shown["codex_sessions"].parent)
+    if runtime == "pi":
+        folded = {_fold(c) for c in cwds}  # Windows: paths are case-blind
+        for key in ("pi_sessions", "pi_session_dir"):
+            root = stores.get(key)
+            if root is None or not root.is_dir():
+                continue
+            for f in sorted(root.rglob("*.jsonl")):
+                try:
+                    recent = f.stat().st_mtime >= since - 5.0
+                except OSError:
+                    continue
+                if recent and _fold(_pi_cwd(f)) in folded:
+                    move(f, f"pi/{key}")
+        return moved, left(shown["pi_sessions"])
     if runtime == "opencode":
         sid = sorted(_opencode_ids(log))
         which = f" (session {', '.join(sid)})" if sid else ""
@@ -1146,6 +1396,17 @@ def sweep_sessions(runtime: str, workdir: Path, since: float, dest: Path, *,
                        f"{shown['cursor_chats']}; it was left — delete it there before any "
                        "other agent runs as this user")
     return moved, ""
+
+
+def _pi_cwd(session: Path) -> str:
+    """The working directory a Pi session file's header names, as `sweep_sessions` compares it."""
+    with contextlib.suppress(OSError, ValueError, UnicodeDecodeError):
+        with open(session, encoding="utf-8") as f:
+            head = json.loads(f.readline(65536))
+        if isinstance(head, dict) and head.get("type") == "session" \
+                and isinstance(head.get("cwd"), str):
+            return str(_abs(head["cwd"]))
+    return ""
 
 
 def _opencode_ids(log: Path | None) -> set[str]:

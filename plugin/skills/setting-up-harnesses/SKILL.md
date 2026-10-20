@@ -1,6 +1,6 @@
 ---
 name: setting-up-harnesses
-description: Choose, install, authenticate and prove the coding-agent CLI that drives PINNForge rounds — claude_code, codex, cursor_agent or opencode — with `pinnforge setup` (named bindings pinned to exact model ids) and `pinnforge doctor --ping`. Use whenever a run dies on its first round, doctor reports a missing or failing agent, a model id is rejected, a provider needs configuring (OpenCode with DeepSeek or any OpenAI-compatible endpoint), or the user asks which agent or model to use.
+description: Choose, install, authenticate and prove the coding-agent CLI that drives PINNForge rounds — claude_code, codex, cursor_agent, opencode or pi — with `pinnforge setup` (named bindings pinned to exact model ids) and `pinnforge doctor --ping`. Use whenever a run dies on its first round, doctor reports a missing or failing agent, a model id is rejected, a provider needs configuring (OpenCode or Pi with DeepSeek or any OpenAI-compatible endpoint), or the user asks which agent or model to use.
 ---
 
 # Setting up the agent that runs the rounds
@@ -15,6 +15,7 @@ identical charter, prompt, working directory and environment.
 | `codex` | `codex` | `gpt-5.4` |
 | `cursor_agent` | `cursor-agent` | `auto` |
 | `opencode` | `opencode` | none — name one (`provider/id`) |
+| `pi` | `pi` | none — name one (`provider/id`) |
 
 ## `pinnforge setup`
 
@@ -70,6 +71,25 @@ export DEEPSEEK_API_KEY=...
 pinnforge setup agent --name deepseek --runtime opencode --model deepseek/deepseek-chat
 ```
 
+## Pi
+
+```bash
+npm install -g @earendil-works/pi-coding-agent   # Node.js 22.19 or newer; or curl -fsSL https://pi.dev/install.sh | sh
+pi                                               # once, interactively: /login (a subscription or an API key)
+pinnforge setup agent --name pi-opus --runtime pi --model anthropic/claude-opus-5-5
+```
+
+Name the model as `provider/id` (`pi --list-models` lists them). Pi matches
+the id loosely within the provider, as an alias would, so a bare name is
+refused and the ping fails an id that Pi only matched, naming the one to pin. A thinking level rides on the id
+(`anthropic/claude-opus-5-5:high`). An endpoint Pi does not ship goes in
+`~/.pi/agent/models.json`, outside any workspace. A round starts Pi with its
+four built-in tools and none of the operator's extensions, skills, prompt
+templates, MCP servers or `AGENTS.md` files, and keeps its session in the
+round's `logs/pi-sessions/`; the authoring, reference and film agents keep
+none, only their logs. On Linux, whatever Pi's tools leave running when
+a round ends or is stopped is stopped with it.
+
 ## Troubleshooting
 
 | symptom | cause | fix |
@@ -79,6 +99,8 @@ pinnforge setup agent --name deepseek --runtime opencode --model deepseek/deepse
 | OpenCode hangs after adding a provider | an `"npm"` field in the provider block | drop `npm`; built-in providers need only `baseURL` + `apiKey` |
 | ping: exit 0 but empty | expired auth | re-authenticate that CLI directly |
 | doctor: agent CLI not on PATH | not installed | install and sign in, or bind another runtime |
+| `runtime 'pi' needs its model as provider/id` | a bare model name | bind `--model provider/id`; `pi --list-models` |
+| Pi ping: `No API key found` or a 401 | Pi not signed in to that provider | run `pi`, `/login`, or export the provider's key |
 
 ## A harness PINNForge has never heard of
 

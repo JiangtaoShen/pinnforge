@@ -35,8 +35,8 @@ answers are not reference material, and listing or reading them is out of
 bounds. Their package files (`problem.md`, `baseline.py`, `eval.py`,
 `eval_grid.csv`, their other data) are fine to learn from; their `.authoring/`
 records are not, and neither are the coding-agent session stores
-(`~/.claude/projects`, `~/.codex/sessions`, OpenCode's and Cursor's data
-directories), which hold other agents' transcripts. What your tool calls touch,
+(`~/.claude/projects`, `~/.codex/sessions`, `~/.pi/agent/sessions`, OpenCode's
+and Cursor's data directories), which hold other agents' transcripts. What your tool calls touch,
 and what they print, is audited afterwards; a package whose author reached for
 any `private/` — or searched for the answers by name — is discarded unread.
 

@@ -30,7 +30,8 @@ PER_PROJECT_WHY = (
     "Not globally (~/.config/opencode, `codex plugin add`, user rules): blocks run inside "
     "a workspace's runs/<id>/ with the same CLI, which reads your user-level config and "
     "often its parent directories' too — so they would load the operator's instructions. "
-    "Only Claude Code blocks are started with the plugin switched off."
+    "Only Claude Code and Pi blocks are started with the operator's plugin, skills and "
+    "instruction files switched off."
 )
 
 
@@ -41,7 +42,7 @@ def install_steps(runtime: str, plugin: Path | None) -> list[str]:
         return [f"mkdir -p .opencode/agent && cp {src}/opencode/pinnforge.md .opencode/agent/"]
     if runtime == "cursor_agent":
         return [f"mkdir -p .cursor/rules && cp {src}/cursor/pinnforge.mdc .cursor/rules/"]
-    if runtime == "codex":
+    if runtime in ("codex", "pi"):  # both read AGENTS.md and the Agent Skills layout
         return [f"cp {src}/AGENTS.md .",
                 f"mkdir -p .agents/skills && cp -r {src}/skills/. .agents/skills/"]
     return []

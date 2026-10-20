@@ -54,8 +54,9 @@ moved to `logs/untrusted-package-N/` in the private home (the author must also
 finish cleanly and write the package in that session). If the ingest or
 reference agent writes anything outside `private/` — the package, `.authoring/`,
 `.anchor/` — it is moved to `logs/reference-guard-N/` and the stage fails.
-Their harness session transcripts are moved to `logs/harness-sessions/`
-(OpenCode and Cursor sessions are warned about instead). `levels.json` must
+Their harness session transcripts are moved to `logs/harness-sessions/` (Pi
+keeps none for them, only the log; OpenCode and Cursor sessions are warned
+about instead). `levels.json` must
 declare a refinement `ratio` between 1.5 and 4; an ingested grid's header must
 be plain identifiers. `task new` honours `private_dir` / `FORGE_PRIVATE_DIR`.
 
