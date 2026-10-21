@@ -221,12 +221,12 @@ def live(tmp_path):
            "PF_TEST_WORKER": str(pidfile)}
     procs = []
 
-    def start():
+    def start(**kw):
         # a group of its own: on Windows a stop reaches a process only through its group
         p = oscompat.popen_group(
             [sys.executable, "task/eval.py", "blocks/b01/b01_x.py", "--gpu", "0"],
             cwd=run, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            encoding="utf-8", errors="replace",
+            encoding="utf-8", errors="replace", **kw,
         )
         procs.append(p)
         return p
@@ -292,6 +292,27 @@ def test_a_stopped_eval_stops_its_worker_and_charges_only_what_it_took(live):
     worker = int(live.pidfile.read_text(encoding="utf-8"))
     assert float(live.budget.read_text(encoding="utf-8")) == 60.0, (
         "the training wall is pre-charged")
+    time.sleep(1.0)
+    _stop(proc)
+    _, err = proc.communicate(timeout=30)
+    assert proc.returncode == 128 + STOP, err
+    assert not _running(worker), "the training worker must not outlive its evaluation"
+    spent = float(live.budget.read_text(encoding="utf-8"))
+    assert 0.5 <= spent < 30, f"charged {spent} s for about a second of training"
+    assert _lock_free(live.lock)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows consoles")
+def test_an_eval_in_a_console_of_its_own_is_stopped_all_the_same(live):
+    """Harnesses hide their tools' windows, which gives each its own console.
+
+    The group's Ctrl-Break never reached an `eval.py` there; it trained on to
+    its wall and was killed with the group, charged all of it.
+    """
+    proc = live.start(creationflags=subprocess.CREATE_NO_WINDOW)
+    assert _until(lambda: live.pidfile.is_file() and live.pidfile.read_text(encoding="utf-8")), (
+        "the worker never started")
+    worker = int(live.pidfile.read_text(encoding="utf-8"))
     time.sleep(1.0)
     _stop(proc)
     _, err = proc.communicate(timeout=30)

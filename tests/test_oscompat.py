@@ -8,7 +8,9 @@ arrives as Ctrl-C — and Windows keeps it by other means (see `oscompat`).
 
 from __future__ import annotations
 
+import contextlib
 import os
+import signal
 import subprocess
 import sys
 import textwrap
@@ -190,6 +192,82 @@ def test_a_stop_request_arrives_as_ctrl_c(tmp_path):
     finally:
         proc.kill()
         proc.wait()
+
+
+@pytest.mark.parametrize("how", ["wait", "communicate"])
+def test_a_wait_on_a_child_gives_way_to_a_stop_request(how):
+    """On Windows `Popen.wait` held a `run stop` off until the agent it waited on exited."""
+    out = subprocess.run(_python(f"""
+        import os, signal, subprocess, sys, threading, time
+        from pinnforge import oscompat
+        signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+        oscompat.listen_for_stop()
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                 stdout=subprocess.PIPE)
+        threading.Timer(0.5, oscompat.request_stop, (os.getpid(),)).start()
+        t0 = time.monotonic()
+        try:
+            oscompat.{how}(child, 60)
+        except KeyboardInterrupt:
+            print(round(time.monotonic() - t0, 1))
+        child.kill()
+        child.wait()
+    """), capture_output=True, text=True, timeout=60)
+    assert out.stdout.strip(), out.stderr
+    assert float(out.stdout) < 5, f"the stop waited {out.stdout.strip()} s for the child"
+
+
+@windows_only
+def test_a_stop_reaches_a_group_member_in_a_console_of_its_own(tmp_path):
+    """Harnesses hide their tools' windows, which gives each its own console."""
+    pidfile, done = tmp_path / "eval.pid", tmp_path / "unwound"
+    proc = oscompat.popen_group(_python(f"""
+        import os, signal, time
+        from pinnforge import oscompat
+        signal.signal(signal.SIGINT, lambda *_: open({str(done)!r}, "w").write("yes"))
+        oscompat.listen_for_stop()
+        open({str(pidfile)!r}, "w").write(str(os.getpid()))
+        time.sleep(60)
+    """), creationflags=subprocess.CREATE_NO_WINDOW)
+    try:
+        _pid_in(pidfile)
+        oscompat.killpg(proc.pid, signal.SIGTERM)
+        assert _until(done.is_file, 10), "the group's stop never reached it"
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            oscompat.killpg(proc.pid, oscompat.SIGKILL)
+        proc.wait()
+        oscompat.forget_group(proc.pid)
+
+
+@windows_only
+def test_a_group_member_sharing_this_console_is_stopped_once(tmp_path):
+    """The Ctrl-Break reaches it; a stop request as well could cut its unwinding short."""
+    pidfile, got = tmp_path / "member.pid", tmp_path / "got"
+    proc = oscompat.popen_group(_python(f"""
+        import os, signal, time
+        from pinnforge import oscompat
+        def note(signum, frame):
+            with open({str(got)!r}, "a") as f:
+                f.write(signal.Signals(signum).name + "\\n")
+        signal.signal(signal.SIGINT, note)
+        signal.signal(signal.SIGBREAK, note)
+        oscompat.listen_for_stop()
+        open({str(pidfile)!r}, "w").write(str(os.getpid()))
+        for _ in range(600):  # SIGBREAK does not cut a sleep short, as SIGINT does
+            time.sleep(0.1)
+    """))
+    try:
+        _pid_in(pidfile)
+        oscompat.killpg(proc.pid, signal.SIGTERM)
+        assert _until(got.is_file, 10), "the Ctrl-Break never reached it"
+        time.sleep(1.0)
+        assert got.read_text(encoding="utf-8").split() == ["SIGBREAK"]
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            oscompat.killpg(proc.pid, oscompat.SIGKILL)
+        proc.wait()
+        oscompat.forget_group(proc.pid)
 
 
 @windows_only

@@ -51,6 +51,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 import uuid
@@ -71,7 +72,9 @@ _WINDOWS = os.name == "nt"
 # lock is `LockFileEx` on one byte far past any data (its locks are
 # mandatory, and must not stop anyone reading the file), and a worker lives
 # in a Job Object that dies with this process — what a process group and
-# PR_SET_PDEATHSIG give on Linux.
+# PR_SET_PDEATHSIG give on Linux. A stop is the console's Ctrl-Break, or —
+# where a harness's hidden tool window gave this process a console of its
+# own, which the Ctrl-Break never reaches — the event the orchestrator sets.
 
 if _WINDOWS:
     import ctypes
@@ -112,6 +115,12 @@ if _WINDOWS:
     _k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
     _k32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
     _k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    _k32.CreateEventW.restype = wintypes.HANDLE
+    _k32.CreateEventW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.BOOL,
+                                  wintypes.LPCWSTR)
+    _k32.ResetEvent.argtypes = (wintypes.HANDLE,)
+    _k32.WaitForSingleObject.restype = wintypes.DWORD
+    _k32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
 
 
 def _lock(f) -> None:
@@ -382,8 +391,33 @@ def _install_handlers() -> dict:
         try:
             old[s] = signal.signal(s, _on_signal)
         except ValueError:  # not the main thread: nothing to install here
-            break
+            return old
+    _listen_for_stop()
     return old
+
+
+_listening: list = []
+
+
+def _listen_for_stop() -> None:
+    """Take the orchestrator's stop request as the Ctrl-Break it stands for (Windows).
+
+    The event is `pinnforge.oscompat.request_stop`'s, and its name must
+    match that one.
+    """
+    if not _WINDOWS or _listening:
+        return
+    h = _k32.CreateEventW(None, True, False, f"Local\\pinnforge-stop-{os.getpid()}")
+    if not h:
+        return
+    _listening.append(h)
+
+    def wait() -> None:
+        while _k32.WaitForSingleObject(h, 0xFFFFFFFF) == 0:  # INFINITE
+            _k32.ResetEvent(h)
+            signal.raise_signal(signal.SIGBREAK)
+
+    threading.Thread(target=wait, name="pinnforge-stop", daemon=True).start()
 
 
 def _restore_handlers(old: dict) -> None:
@@ -561,6 +595,24 @@ def _stop_worker(proc: subprocess.Popen, grace: float = WORKER_GRACE_S) -> None:
         proc.wait(timeout=10)
 
 
+def _communicate(proc: subprocess.Popen, wall: float) -> tuple[str, str]:
+    """`proc.communicate(timeout=wall)`, in slices on Windows.
+
+    There one wait holds a stop signal off until the worker exits: a stopped
+    evaluation trained on to its wall, and was killed — charged all of it —
+    by an orchestrator that had stopped waiting.
+    """
+    if not _WINDOWS:
+        return proc.communicate(timeout=wall)
+    deadline = time.monotonic() + wall
+    while True:
+        try:
+            return proc.communicate(timeout=max(0.0, min(0.25, deadline - time.monotonic())))
+        except subprocess.TimeoutExpired:
+            if time.monotonic() >= deadline:
+                raise
+
+
 def _spawn(cmd: list[str], env: dict, wall: float, keep_fds=(), clock=None):
     """Run a worker to completion under `wall`. -> (returncode, stdout, stderr, timed_out)
 
@@ -593,7 +645,7 @@ def _spawn(cmd: list[str], env: dict, wall: float, keep_fds=(), clock=None):
     try:
         try:
             try:
-                out, err = proc.communicate(timeout=wall)
+                out, err = _communicate(proc, wall)
             except subprocess.TimeoutExpired:
                 _stop_worker(proc, grace=0)
                 out, err = proc.communicate()

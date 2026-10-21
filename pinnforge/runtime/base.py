@@ -56,7 +56,7 @@ class AgentHandle:
         if self.process is None:
             return None
         try:
-            return self.process.wait(timeout=timeout)
+            return oscompat.wait(self.process, timeout)
         except subprocess.TimeoutExpired:
             return None
 

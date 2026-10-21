@@ -258,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(signal, name):
             signal.signal(getattr(signal, name), relay)
     if not reap:
-        status = proc.wait()
+        status = oscompat.wait(proc)  # in slices on Windows, so `relay` gets its turn
     else:
         r = Reaper(proc)
         stopping = False

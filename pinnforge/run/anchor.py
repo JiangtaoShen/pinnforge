@@ -232,7 +232,7 @@ def _run_group(cmd: list[str], cwd: Path, env: dict | None = None) -> subprocess
         env=env,
     )
     try:
-        out, err = proc.communicate()
+        out, err = oscompat.communicate(proc)
     except BaseException:
         pgid = proc.pid
         for sig, grace in ((signal.SIGTERM, 10.0), (oscompat.SIGKILL, 5.0)):

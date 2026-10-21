@@ -87,9 +87,9 @@ endpoint Pi does not ship goes in `~/.pi/agent/models.json`, outside any
 workspace. A round starts Pi with its four built-in tools and none of the
 operator's extensions, skills, prompt templates, MCP servers or `AGENTS.md`
 files, and keeps its session in the round's `logs/pi-sessions/`; the
-authoring, reference and film agents keep none, only their logs. On Linux,
-whatever Pi's tools leave running when a round ends or is stopped is stopped
-with it.
+authoring, reference and film agents keep none, only their logs. On Linux and
+Windows, whatever Pi's tools leave running when a round ends or is stopped is
+stopped with it.
 
 ## Troubleshooting
 

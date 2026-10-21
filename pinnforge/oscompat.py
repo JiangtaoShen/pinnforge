@@ -27,6 +27,11 @@ and some of its near-equivalents do something else entirely:
   `request_stop` sets an event the target waits on (`listen_for_stop`),
   which reaches its main thread as Ctrl-C, so it unwinds the way it would
   on SIGTERM.
+
+* **Waiting on a child.** `Popen.wait` and `communicate` are one kernel
+  wait, and a signal — Ctrl-C, or a stop request arriving as one — reaches
+  the main thread only once it returns, when the child has exited. `wait`
+  and `communicate` wait in slices instead.
 """
 
 from __future__ import annotations
@@ -104,6 +109,11 @@ if WINDOWS:
                     ("ActiveProcesses", wintypes.DWORD),
                     ("TotalTerminatedProcesses", wintypes.DWORD)]
 
+    class _PROCESS_IDS(ctypes.Structure):  # JOBOBJECT_BASIC_PROCESS_ID_LIST
+        _fields_ = [("NumberOfAssignedProcesses", wintypes.DWORD),
+                    ("NumberOfProcessIdsInList", wintypes.DWORD),
+                    ("ProcessIdList", ctypes.c_size_t * 1024)]
+
     _k32.CreateJobObjectW.restype = wintypes.HANDLE
     _k32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
     _k32.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID,
@@ -126,6 +136,8 @@ if WINDOWS:
     _k32.ResetEvent.argtypes = (wintypes.HANDLE,)
     _k32.WaitForSingleObject.restype = wintypes.DWORD
     _k32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    _k32.GetConsoleProcessList.restype = wintypes.DWORD
+    _k32.GetConsoleProcessList.argtypes = (wintypes.LPDWORD, wintypes.DWORD)
     _k32.LockFileEx.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
                                 wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(_OVERLAPPED))
     _k32.UnlockFileEx.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
@@ -136,6 +148,7 @@ if WINDOWS:
     _ERROR_ACCESS_DENIED = 5
     _ERROR_LOCK_VIOLATION = 33
     _ERROR_NOT_LOCKED = 158
+    _ERROR_MORE_DATA = 234
     _PROCESS_TERMINATE = 0x0001
     _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     _EVENT_MODIFY_STATE = 0x0002
@@ -144,6 +157,7 @@ if WINDOWS:
     _LOCKFILE_EXCLUSIVE_LOCK = 0x2
     _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
     _JobObjectBasicAccountingInformation = 1
+    _JobObjectBasicProcessIdList = 3
     _JobObjectExtendedLimitInformation = 9
     _CREATE_SUSPENDED = 0x4
     _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
@@ -526,6 +540,26 @@ def _job_active(job: int) -> int:
     return int(info.ActiveProcesses)
 
 
+def _job_pids(job: int) -> list[int]:
+    info = _PROCESS_IDS()
+    if not _k32.QueryInformationJobObject(job, _JobObjectBasicProcessIdList,
+                                          ctypes.byref(info), ctypes.sizeof(info), None) \
+            and ctypes.get_last_error() != _ERROR_MORE_DATA:  # more than fit: these did
+        return []
+    return [int(p) for p in info.ProcessIdList[:info.NumberOfProcessIdsInList]]
+
+
+def _console_pids() -> set[int]:
+    """The processes attached to this process's console (none without one)."""
+    n = 64
+    while True:
+        buf = (wintypes.DWORD * n)()
+        got = _k32.GetConsoleProcessList(buf, n)
+        if got <= n:
+            return {int(p) for p in buf[:got]}
+        n = got  # too small, and left empty: this many are attached
+
+
 def group_alive(pgid) -> bool:
     """Does process group `pgid` have a live member? (`os.killpg(pgid, 0)` succeeding.)"""
     pgid = _as_pid(pgid)
@@ -548,7 +582,12 @@ def killpg(pgid, sig: int) -> None:
 
     On Windows: `SIGKILL` terminates the job; any other stop signal is the
     console's Ctrl-Break, which reaches every member sharing this console
-    (and a Python one as SIGBREAK, which pinnforge's processes unwind on).
+    (and a Python one as SIGBREAK, which pinnforge's processes unwind on),
+    and a stop request to every member in a console of its own, which the
+    Ctrl-Break never reaches: harnesses start their tools with the window
+    hidden, which gives each one — and the `eval.py` it runs — such a
+    console. Only one of the two: a second stop could cut the first's
+    unwinding short.
     """
     if not WINDOWS:
         os.killpg(pgid, sig)
@@ -563,9 +602,46 @@ def killpg(pgid, sig: int) -> None:
         return
     with contextlib.suppress(OSError):
         os.kill(pgid, signal.CTRL_BREAK_EVENT)
+    here = _console_pids()
+    for pid in _job_pids(_jobs[pgid]):
+        if pid not in here:
+            request_stop(pid)
 
 
 def forget_group(pgid) -> None:
     """Drop this process's hold on group `pgid` (Windows: close its job, ending what is left)."""
     if WINDOWS and (job := _jobs.pop(_as_pid(pgid) or 0, None)) is not None:
         _k32.CloseHandle(job)
+
+
+# ─────────────────────────────── waiting ───────────────────────────────
+
+# The longest one wait on a child holds a signal off, on Windows.
+_WAIT_SLICE_S = 0.25
+
+
+def wait(proc: subprocess.Popen, timeout: float | None = None) -> int:
+    """`proc.wait(timeout)`, which a Ctrl-C or a stop request cuts short.
+
+    On Windows `Popen.wait` took a `run stop` only once the agent it waited
+    on had exited or the poll ran out, up to a minute later.
+    """
+    return _sliced(lambda t: proc.wait(timeout=t), timeout)
+
+
+def communicate(proc: subprocess.Popen, timeout: float | None = None) -> tuple:
+    """`proc.communicate(timeout=timeout)`, cut short the way `wait` is."""
+    return _sliced(lambda t: proc.communicate(timeout=t), timeout)
+
+
+def _sliced(call, timeout: float | None):
+    if not WINDOWS:
+        return call(timeout)
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        left = _WAIT_SLICE_S if deadline is None else max(0.0, deadline - time.monotonic())
+        try:
+            return call(min(left, _WAIT_SLICE_S))
+        except subprocess.TimeoutExpired:  # retried, as `communicate` allows, without loss
+            if deadline is not None and time.monotonic() >= deadline:
+                raise
