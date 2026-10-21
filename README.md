@@ -107,7 +107,7 @@ the predicted field of the incumbent.
 | `claude_code` | `claude` | `claude-opus-4-8` |
 | `codex` | `codex` | `gpt-5.4` |
 | `cursor_agent` | `cursor-agent` | `auto` |
-| `opencode` | `opencode` | none; name one |
+| `opencode` | `opencode` | none; name one (`provider/id`) |
 | `pi` | `pi` | none; name one (`provider/id`) |
 
 `pinnforge setup` pins an exact model id and pings it. The model each round

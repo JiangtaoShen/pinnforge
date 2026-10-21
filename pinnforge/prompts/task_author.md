@@ -36,9 +36,10 @@ bounds. Their package files (`problem.md`, `baseline.py`, `eval.py`,
 `eval_grid.csv`, their other data) are fine to learn from; their `.authoring/`
 records are not, and neither are the coding-agent session stores
 (`~/.claude/projects`, `~/.codex/sessions`, `~/.pi/agent/sessions`, OpenCode's
-and Cursor's data directories), which hold other agents' transcripts. What your tool calls touch,
-and what they print, is audited afterwards; a package whose author reached for
-any `private/` — or searched for the answers by name — is discarded unread.
+and Cursor's data directories), which hold other agents' transcripts. What your
+tool calls touch, and what they print, is audited afterwards; a package whose
+author reached for any `private/` — or searched for the answers by name — is
+discarded unread.
 
 **The package states the problem, never its solution.** Not a closed-form or
 manufactured solution, not values of the solution, not where or how the

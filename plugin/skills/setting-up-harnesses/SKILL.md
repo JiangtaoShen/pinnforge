@@ -81,14 +81,15 @@ pinnforge setup agent --name pi-opus --runtime pi --model anthropic/claude-opus-
 
 Name the model as `provider/id` (`pi --list-models` lists them). Pi matches
 the id loosely within the provider, as an alias would, so a bare name is
-refused and the ping fails an id that Pi only matched, naming the one to pin. A thinking level rides on the id
-(`anthropic/claude-opus-5-5:high`). An endpoint Pi does not ship goes in
-`~/.pi/agent/models.json`, outside any workspace. A round starts Pi with its
-four built-in tools and none of the operator's extensions, skills, prompt
-templates, MCP servers or `AGENTS.md` files, and keeps its session in the
-round's `logs/pi-sessions/`; the authoring, reference and film agents keep
-none, only their logs. On Linux, whatever Pi's tools leave running when
-a round ends or is stopped is stopped with it.
+refused and the ping fails an id that Pi only matched, naming the one to pin.
+A thinking level rides on the id (`anthropic/claude-opus-5-5:high`). An
+endpoint Pi does not ship goes in `~/.pi/agent/models.json`, outside any
+workspace. A round starts Pi with its four built-in tools and none of the
+operator's extensions, skills, prompt templates, MCP servers or `AGENTS.md`
+files, and keeps its session in the round's `logs/pi-sessions/`; the
+authoring, reference and film agents keep none, only their logs. On Linux,
+whatever Pi's tools leave running when a round ends or is stopped is stopped
+with it.
 
 ## Troubleshooting
 

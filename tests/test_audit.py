@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -425,11 +426,11 @@ def test_a_framework_root_does_not_excuse_another(scope, command):
     assert audit.HUNT in _hits(scope, _claude(("Bash", {"command": cmd}))), cmd
 
 
-def test_a_link_planted_in_the_framework_does_not_lead_out(scope, ws, tmp_path, monkeypatch):
+def test_a_link_planted_in_the_framework_does_not_lead_out(scope, ws, tmp_path, monkeypatch, plant):
     fw = tmp_path / "fw"
     fw.mkdir()
     (fw / "real.py").write_text("x = 1\n")
-    (fw / "zz.py").symlink_to(ws / "tasks" / "ldc" / "private")
+    plant(fw / "zz.py", ws / "tasks" / "ldc" / "private")
     monkeypatch.setattr(audit, "_FRAMEWORK", str(fw.resolve()))
     assert _hits(scope, _claude(("Bash", {"command": f"grep -rn ref_values {fw}/real.py"}))) == []
     globbed = f"grep -rn ref_values {fw}/*.py"  # the glob takes in the link
@@ -605,7 +606,7 @@ def test_pi_sessions_that_name_the_workdir_move(tmp_path, monkeypatch):
     started = time.time()
 
     def session(name, cwd, age=0.0):
-        d = store / ("--" + str(cwd).strip("/").replace("/", "-") + "--")
+        d = store / ("--" + re.sub(r"[/\\:]", "-", re.sub(r"^[/\\]", "", str(cwd))) + "--")
         d.mkdir(parents=True, exist_ok=True)
         f = d / name
         f.write_text(json.dumps({"type": "session", "version": 3, "id": name,

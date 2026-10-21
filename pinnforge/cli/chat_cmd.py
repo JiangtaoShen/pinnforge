@@ -27,10 +27,10 @@ def plugin_dir() -> Path | None:
 
 # Why Codex, Cursor and OpenCode get the operator plugin per project only.
 PER_PROJECT_WHY = (
-    "Not globally (~/.config/opencode, `codex plugin add`, user rules): blocks run inside "
+    "Not globally (~/.config/opencode, `codex plugin add`, user rules): rounds run inside "
     "a workspace's runs/<id>/ with the same CLI, which reads your user-level config and "
     "often its parent directories' too — so they would load the operator's instructions. "
-    "Only Claude Code and Pi blocks are started with the operator's plugin, skills and "
+    "Only Claude Code and Pi rounds are started with the operator's plugin, skills and "
     "instruction files switched off."
 )
 
